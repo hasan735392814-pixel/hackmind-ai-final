@@ -1,0 +1,1841 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isValidId(id) {
+      return id is string && id.matches('^[a-zA-Z0-9_\\-]{1,128}$');
+    }
+
+    function isValidCompositeId(id) {
+      return id is string && id.matches('^[a-zA-Z0-9_\\-]{1,257}$');
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isApprovedOrganizerOrAdmin() {
+      return isAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approvedRole == 'organizer'
+      );
+    }
+
+    function hasApprovedRegistrationDoc(regId, hackathonId, uid) {
+      let regPath = /databases/$(database)/documents/registrations/$(regId);
+      return isValidCompositeId(regId) &&
+        exists(regPath) &&
+        isApprovedRegistrationData(get(regPath).data, hackathonId, uid);
+    }
+
+    function isApprovedRegistrationData(data, hackathonId, uid) {
+      return data.userId == uid &&
+        data.hackathonId == hackathonId &&
+        data.status == 'approved';
+    }
+
+    function hasApprovedRegistration(hackathonId, uid) {
+      return hasApprovedRegistrationDoc(hackathonId + '_' + uid, hackathonId, uid);
+    }
+
+    function canGetMissingOwnRegistration(registrationId) {
+      let suffix = '_' + request.auth.uid;
+      return isValidCompositeId(registrationId) &&
+        registrationId.size() > suffix.size() &&
+        registrationId[registrationId.size() - suffix.size() : registrationId.size()] == suffix &&
+        isValidId(registrationId[0 : registrationId.size() - suffix.size()]);
+    }
+
+    function isStrMaxLen(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || isStrMaxLen(data[field], maxLen);
+    }
+
+    function isValidHttpUrlMaxLen(val, maxLen) {
+      return val is string &&
+        val.size() <= maxLen &&
+        (val == '' || val.matches('^https?://[^\\s]+$'));
+    }
+
+    function isOptionalHttpUrl(data, field, maxLen) {
+      return !(field in data) || isValidHttpUrlMaxLen(data[field], maxLen);
+    }
+
+    function isValidSha256Hex(val) {
+      return val is string && val.size() == 64 && val.matches('^[0-9a-f]{64}$');
+    }
+
+    function isValidHttpUrlElement(listVal, idx) {
+      return listVal.size() <= idx || isValidHttpUrlMaxLen(listVal[idx], 400);
+    }
+
+    function isValidHttpUrlListValue(urls) {
+      return urls is list &&
+        urls.size() <= 6 &&
+        isValidHttpUrlElement(urls, 0) &&
+        isValidHttpUrlElement(urls, 1) &&
+        isValidHttpUrlElement(urls, 2) &&
+        isValidHttpUrlElement(urls, 3) &&
+        isValidHttpUrlElement(urls, 4) &&
+        isValidHttpUrlElement(urls, 5);
+    }
+
+    function isOptionalHttpUrlList(data, field) {
+      return !(field in data) || isValidHttpUrlListValue(data[field]);
+    }
+
+    function isValidInternalLink(link) {
+      return link is string && link.size() <= 200 && (link == '' || link.matches('^/app(/[a-zA-Z0-9_\\-]+)*$'));
+    }
+
+    function isBoundedStringList(listVal, maxItems) {
+      return listVal is list && listVal.size() <= maxItems && (listVal.size() == 0 || listVal[0] is string);
+    }
+
+    function isParentHackathonOrganizerForAssignment(assignmentId, hackathonId, judgeId) {
+      return isValidId(hackathonId)
+        && isValidId(judgeId)
+        && assignmentId == hackathonId + '_' + judgeId
+        && exists(/databases/$(database)/documents/hackathons/$(hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(hackathonId)).data.organizerId == request.auth.uid;
+    }
+
+    function canOrganizerGetMissingAssignment(assignmentId) {
+      let parts = assignmentId.split('_');
+      return isApprovedOrganizerOrAdmin() && (
+        (parts.size() == 2 && isParentHackathonOrganizerForAssignment(assignmentId, parts[0], parts[1])) ||
+        (parts.size() == 3 && (
+          isParentHackathonOrganizerForAssignment(assignmentId, parts[0] + '_' + parts[1], parts[2]) ||
+          isParentHackathonOrganizerForAssignment(assignmentId, parts[0], parts[1] + '_' + parts[2])
+        )) ||
+        (parts.size() == 4 && (
+          isParentHackathonOrganizerForAssignment(assignmentId, parts[0] + '_' + parts[1] + '_' + parts[2], parts[3]) ||
+          isParentHackathonOrganizerForAssignment(assignmentId, parts[0] + '_' + parts[1], parts[2] + '_' + parts[3])
+        )) ||
+        (parts.size() == 5 && (
+          isParentHackathonOrganizerForAssignment(assignmentId, parts[0] + '_' + parts[1] + '_' + parts[2], parts[3] + '_' + parts[4]) ||
+          isParentHackathonOrganizerForAssignment(assignmentId, parts[0] + '_' + parts[1] + '_' + parts[2] + '_' + parts[3], parts[4])
+        ))
+      );
+    }
+
+    function canGetMissingEvaluationCandidate(evaluationId, subId, jId) {
+      return isValidId(subId)
+        && isValidId(jId)
+        && evaluationId == subId + '_' + jId
+        && (jId == request.auth.uid || isApprovedOrganizerOrAdmin())
+        && exists(/databases/$(database)/documents/submissions/$(subId))
+        && exists(/databases/$(database)/documents/hackathons/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId)).data.organizerId == get(/databases/$(database)/documents/submissions/$(subId)).data.organizerId
+        && exists(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId))
+        && get(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId)).data.hackathonId == get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId
+        && get(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId)).data.judgeId == jId
+        && subId in get(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId)).data.assignedSubmissionIds
+        && (
+          (
+            jId == request.auth.uid
+            && !(request.auth.uid in get(/databases/$(database)/documents/submissions/$(subId)).data.memberIds)
+            && get(/databases/$(database)/documents/submissions/$(subId)).data.status in ['submitted', 'under_review', 'evaluated']
+            && get(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId)).data.status == 'accepted'
+            && get(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId)).data.conflictDeclared == false
+          ) ||
+          (
+            isApprovedOrganizerOrAdmin()
+            && get(/databases/$(database)/documents/submissions/$(subId)).data.organizerId == request.auth.uid
+            && get(/databases/$(database)/documents/hackathons/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId)).data.organizerId == request.auth.uid
+            && get(/databases/$(database)/documents/judgeAssignments/$(get(/databases/$(database)/documents/submissions/$(subId)).data.hackathonId + '_' + jId)).data.organizerId == request.auth.uid
+          )
+        );
+    }
+
+    function canGetMissingEvaluation(evaluationId) {
+      let parts = evaluationId.split('_');
+      return isVerifiedUser() && (
+        (parts.size() == 2 && canGetMissingEvaluationCandidate(evaluationId, parts[0], parts[1])) ||
+        (parts.size() == 3 && (
+          canGetMissingEvaluationCandidate(evaluationId, parts[0] + '_' + parts[1], parts[2]) ||
+          canGetMissingEvaluationCandidate(evaluationId, parts[0], parts[1] + '_' + parts[2])
+        )) ||
+        (parts.size() == 4 && (
+          canGetMissingEvaluationCandidate(evaluationId, parts[0] + '_' + parts[1] + '_' + parts[2], parts[3]) ||
+          canGetMissingEvaluationCandidate(evaluationId, parts[0] + '_' + parts[1], parts[2] + '_' + parts[3])
+        )) ||
+        (parts.size() == 5 && (
+          canGetMissingEvaluationCandidate(evaluationId, parts[0] + '_' + parts[1] + '_' + parts[2], parts[3] + '_' + parts[4]) ||
+          canGetMissingEvaluationCandidate(evaluationId, parts[0] + '_' + parts[1] + '_' + parts[2] + '_' + parts[3], parts[4])
+        ))
+      );
+    }
+
+    // Validation Blueprints
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'requestedRole', 'approvedRole', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'title', 'bio', 'skills', 'experienceLevel',
+          'interests', 'preferredRoles', 'preferredLanguages', 'availability',
+          'teamPreference', 'portfolioUrl', 'githubUrl', 'linkedinUrl',
+          'photoUrl', 'requestedRole', 'approvedRole', 'accountRole',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.requestedRole in ['participant', 'organizer', 'judge', 'sponsor']
+        && data.approvedRole in ['participant', 'organizer', 'judge', 'sponsor']
+        && (!('accountRole' in data) || data.accountRole in ['participant', 'organizer', 'judge', 'sponsor'])
+        && isOptionalString(data, 'title', 100)
+        && isOptionalString(data, 'bio', 1000)
+        && (!('skills' in data) || isBoundedStringList(data.skills, 15))
+        && (!('experienceLevel' in data) || data.experienceLevel in ['beginner', 'intermediate', 'advanced', 'expert'])
+        && (!('interests' in data) || isBoundedStringList(data.interests, 10))
+        && (!('preferredRoles' in data) || isBoundedStringList(data.preferredRoles, 6))
+        && (!('preferredLanguages' in data) || isBoundedStringList(data.preferredLanguages, 10))
+        && (!('availability' in data) || data.availability in ['part_time', 'full_time', 'weekends_only'])
+        && (!('teamPreference' in data) || data.teamPreference in ['looking_for_team', 'open_to_join', 'already_have_team', 'solo'])
+        && isOptionalHttpUrl(data, 'portfolioUrl', 300)
+        && isOptionalHttpUrl(data, 'githubUrl', 300)
+        && isOptionalHttpUrl(data, 'linkedinUrl', 300)
+        && isOptionalHttpUrl(data, 'photoUrl', 500)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['uid', 'email', 'notificationsEnabled', 'aiCloudConsent', 'preferredLocale', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'notificationsEnabled', 'aiCloudConsent', 'preferredLocale', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.notificationsEnabled is bool
+        && data.aiCloudConsent is bool
+        && data.preferredLocale in ['en', 'ar']
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHackathon(data) {
+      return data.keys().hasAll([
+          'id', 'organizerId', 'organizerName', 'title', 'description',
+          'mode', 'maxTeamSize', 'status', 'resultsPublished', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'organizerId', 'organizerName', 'title', 'tagline', 'description',
+          'coverImageUrl', 'startDate', 'endDate', 'registrationDeadline',
+          'submissionDeadline', 'registrationDeadlineAt', 'submissionDeadlineAt',
+          'mode', 'location', 'tracks', 'technologies',
+          'eligibility', 'rules', 'prizes', 'sponsors', 'rubric',
+          'maxTeamSize', 'status', 'resultsPublished', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.organizerId)
+        && data.organizerName is string && data.organizerName.size() >= 1 && data.organizerName.size() <= 100
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
+        && isOptionalString(data, 'tagline', 200)
+        && data.description is string && data.description.size() >= 10 && data.description.size() <= 8000
+        && isOptionalHttpUrl(data, 'coverImageUrl', 500)
+        && isOptionalString(data, 'startDate', 40)
+        && isOptionalString(data, 'endDate', 40)
+        && isOptionalString(data, 'registrationDeadline', 40)
+        && isOptionalString(data, 'submissionDeadline', 40)
+        && (!('registrationDeadlineAt' in data) || data.registrationDeadlineAt is timestamp)
+        && (!('submissionDeadlineAt' in data) || data.submissionDeadlineAt is timestamp)
+        && data.mode in ['online', 'in_person', 'hybrid']
+        && isOptionalString(data, 'location', 200)
+        && (!('tracks' in data) || isBoundedStringList(data.tracks, 12))
+        && (!('technologies' in data) || isBoundedStringList(data.technologies, 15))
+        && isOptionalString(data, 'eligibility', 3000)
+        && isOptionalString(data, 'rules', 6000)
+        && (!('prizes' in data) || isBoundedStringList(data.prizes, 10))
+        && (!('sponsors' in data) || isBoundedStringList(data.sponsors, 10))
+        && (!('rubric' in data) || (data.rubric is list && data.rubric.size() <= 10))
+        && data.maxTeamSize is int && data.maxTeamSize >= 1 && data.maxTeamSize <= 10
+        && data.status in ['draft', 'published', 'judging', 'completed']
+        && data.resultsPublished is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'userId', 'userName', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'hackathonId', 'organizerId', 'userId', 'userName',
+          'userTitle', 'preferredTrack', 'motivation', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidCompositeId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && isValidId(data.userId)
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 100
+        && isOptionalString(data, 'userTitle', 100)
+        && isOptionalString(data, 'preferredTrack', 100)
+        && isOptionalString(data, 'motivation', 1500)
+        && data.status in ['pending', 'approved', 'rejected', 'withdrawn']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTeam(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'name', 'leaderId', 'memberIds', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'hackathonId', 'organizerId', 'registrationId', 'name', 'description',
+          'leaderId', 'memberIds', 'memberNames',
+          'lookingForRoles', 'track', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && (!('registrationId' in data) || isValidCompositeId(data.registrationId))
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && isOptionalString(data, 'description', 600)
+        && isValidId(data.leaderId)
+        && isBoundedStringList(data.memberIds, 10)
+        && (!('memberNames' in data) || isBoundedStringList(data.memberNames, 10))
+        && (!('lookingForRoles' in data) || isBoundedStringList(data.lookingForRoles, 6))
+        && isOptionalString(data, 'track', 100)
+        && data.status in ['forming', 'locked', 'submitted']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTeamMember(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'roleInTeam', 'joinedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'roleInTeam', 'registrationId', 'joinedAt'])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.roleInTeam is string && data.roleInTeam.size() >= 1 && data.roleInTeam.size() <= 80
+        && (!('registrationId' in data) || isValidCompositeId(data.registrationId))
+        && data.joinedAt is timestamp;
+    }
+
+    function isValidTeamInvitation(data) {
+      return data.keys().hasAll(['id', 'teamId', 'teamName', 'hackathonId', 'fromUserId', 'toUserId', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'teamId', 'teamName', 'hackathonId', 'fromUserId', 'fromUserName',
+          'toUserId', 'toUserName', 'roleOffered', 'message', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.teamId)
+        && data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80
+        && isValidId(data.hackathonId)
+        && isValidId(data.fromUserId)
+        && isOptionalString(data, 'fromUserName', 100)
+        && isValidId(data.toUserId)
+        && isOptionalString(data, 'toUserName', 100)
+        && isOptionalString(data, 'roleOffered', 80)
+        && isOptionalString(data, 'message', 500)
+        && data.status in ['pending', 'accepted', 'rejected', 'cancelled']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'teamId', 'ownerId', 'memberIds', 'title', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'hackathonId', 'organizerId', 'teamId', 'ownerId', 'memberIds',
+          'title', 'problemStatement', 'proposedSolution', 'targetUsers',
+          'technologies', 'roadmap', 'tasks', 'notes', 'aiMentorApprovedSummary',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && isValidId(data.teamId)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.memberIds, 10)
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 140
+        && isOptionalString(data, 'problemStatement', 3000)
+        && isOptionalString(data, 'proposedSolution', 4000)
+        && isOptionalString(data, 'targetUsers', 1000)
+        && (!('technologies' in data) || isBoundedStringList(data.technologies, 15))
+        && (!('roadmap' in data) || isBoundedStringList(data.roadmap, 20))
+        && (!('tasks' in data) || (data.tasks is list && data.tasks.size() <= 30))
+        && isOptionalString(data, 'notes', 5000)
+        && isOptionalString(data, 'aiMentorApprovedSummary', 5000)
+        && data.status in ['ideation', 'building', 'submitted']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSubmission(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'teamId', 'projectId', 'ownerId', 'memberIds', 'title', 'shortDescription', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'hackathonId', 'organizerId', 'teamId', 'teamName', 'projectId',
+          'ownerId', 'memberIds', 'memberNames', 'title', 'shortDescription',
+          'fullDescription', 'problemStatement', 'proposedSolution', 'technologies',
+          'githubUrl', 'demoUrl', 'videoUrl', 'screenshotUrls', 'track',
+          'assignedJudgeIds', 'status', 'submittedAt', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && isValidId(data.teamId)
+        && isOptionalString(data, 'teamName', 80)
+        && isValidId(data.projectId)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.memberIds, 10)
+        && (!('memberNames' in data) || isBoundedStringList(data.memberNames, 10))
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 140
+        && data.shortDescription is string && data.shortDescription.size() >= 5 && data.shortDescription.size() <= 300
+        && isOptionalString(data, 'fullDescription', 8000)
+        && isOptionalString(data, 'problemStatement', 3000)
+        && isOptionalString(data, 'proposedSolution', 4000)
+        && (!('technologies' in data) || isBoundedStringList(data.technologies, 15))
+        && isOptionalHttpUrl(data, 'githubUrl', 300)
+        && isOptionalHttpUrl(data, 'demoUrl', 300)
+        && isOptionalHttpUrl(data, 'videoUrl', 300)
+        && isOptionalHttpUrlList(data, 'screenshotUrls')
+        && isOptionalString(data, 'track', 100)
+        && (!('assignedJudgeIds' in data) || isBoundedStringList(data.assignedJudgeIds, 20))
+        && data.status in ['draft', 'submitted', 'under_review', 'evaluated']
+        && (!('submittedAt' in data) || data.submittedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidJudgeAssignment(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'judgeId', 'judgeName', 'assignedSubmissionIds', 'conflictDeclared', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'hackathonId', 'organizerId', 'judgeId', 'judgeName',
+          'assignedSubmissionIds', 'conflictDeclared', 'conflictNotes',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidCompositeId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && isValidId(data.judgeId)
+        && data.judgeName is string && data.judgeName.size() >= 1 && data.judgeName.size() <= 100
+        && isBoundedStringList(data.assignedSubmissionIds, 50)
+        && data.conflictDeclared is bool
+        && isOptionalString(data, 'conflictNotes', 1000)
+        && data.status in ['invited', 'accepted', 'declined']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function matchesRubricCriterionScalar(rItem, criterionId, weight) {
+      return rItem.id == criterionId && math.abs(weight - rItem.weight) <= 0.01;
+    }
+
+    function matchesAnyRubricListItem(rubric, criterionId, weight) {
+      let n = rubric.size();
+      return n >= 1
+        && n <= 12
+        && (
+          (n >= 1 && matchesRubricCriterionScalar(rubric[0], criterionId, weight)) ||
+          (n >= 2 && matchesRubricCriterionScalar(rubric[1], criterionId, weight)) ||
+          (n >= 3 && matchesRubricCriterionScalar(rubric[2], criterionId, weight)) ||
+          (n >= 4 && matchesRubricCriterionScalar(rubric[3], criterionId, weight)) ||
+          (n >= 5 && matchesRubricCriterionScalar(rubric[4], criterionId, weight)) ||
+          (n >= 6 && matchesRubricCriterionScalar(rubric[5], criterionId, weight)) ||
+          (n >= 7 && matchesRubricCriterionScalar(rubric[6], criterionId, weight)) ||
+          (n >= 8 && matchesRubricCriterionScalar(rubric[7], criterionId, weight)) ||
+          (n >= 9 && matchesRubricCriterionScalar(rubric[8], criterionId, weight)) ||
+          (n >= 10 && matchesRubricCriterionScalar(rubric[9], criterionId, weight)) ||
+          (n >= 11 && matchesRubricCriterionScalar(rubric[10], criterionId, weight)) ||
+          (n >= 12 && matchesRubricCriterionScalar(rubric[11], criterionId, weight))
+        );
+    }
+
+    function matchesAnyHackathonRubricItem(hack, criterionId, weight) {
+      return hack.status in ['published', 'judging', 'completed']
+        && ('rubric' in hack)
+        && hack.rubric is list
+        && matchesAnyRubricListItem(hack.rubric, criterionId, weight);
+    }
+
+    function isValidEvaluationCriterionDoc(data, evaluationId, criterionId) {
+      return data.keys().hasAll([
+          'criterionId', 'evaluationId', 'hackathonId', 'submissionId',
+          'judgeId', 'criterionName', 'weight', 'score', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'criterionId', 'evaluationId', 'hackathonId', 'submissionId',
+          'judgeId', 'criterionName', 'weight', 'score', 'comment', 'updatedAt'
+        ])
+        && isValidId(data.criterionId)
+        && data.criterionId == criterionId
+        && isValidCompositeId(data.evaluationId)
+        && data.evaluationId == evaluationId
+        && isValidId(data.hackathonId)
+        && isValidId(data.submissionId)
+        && isValidId(data.judgeId)
+        && data.criterionName is string
+        && data.criterionName.matches('^[\\s\\S]{1,120}$')
+        && data.weight is number && data.weight >= 0 && data.weight <= 100
+        && data.score is number && data.score >= 0 && data.score <= 10
+        && (!('comment' in data) || (data.comment is string && data.comment.matches('^[\\s\\S]{0,1000}$')))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEvaluation(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'submissionId', 'judgeId', 'criteriaScores', 'weightedTotal', 'conflictOfInterest', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'hackathonId', 'organizerId', 'submissionId', 'judgeId', 'judgeName',
+          'criteriaScores', 'weightedTotal', 'scoredCriterionCount', 'storageSchema',
+          'conflictOfInterest', 'conflictReason', 'humanFeedback',
+          'aiReportSummary', 'aiInferenceSource', 'status', 'submittedAt', 'createdAt', 'updatedAt'
+        ])
+        && isValidCompositeId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && isValidId(data.submissionId)
+        && isValidId(data.judgeId)
+        && isOptionalString(data, 'judgeName', 100)
+        && data.criteriaScores is list
+        && data.criteriaScores.size() == 0
+        && (!('scoredCriterionCount' in data) || (data.scoredCriterionCount is int && data.scoredCriterionCount >= 0 && data.scoredCriterionCount <= 50))
+        && (!('storageSchema' in data) || data.storageSchema in ['v1_inline', 'v2_subcollection'])
+        && data.weightedTotal is number && data.weightedTotal >= 0 && data.weightedTotal <= 100
+        && (
+          (('scoredCriterionCount' in data) && data.scoredCriterionCount > 0 && !data.conflictOfInterest) ||
+          data.weightedTotal == 0
+        )
+        && data.conflictOfInterest is bool
+        && isOptionalString(data, 'conflictReason', 500)
+        && (
+          !data.conflictOfInterest || (
+            data.criteriaScores.size() == 0
+            && data.weightedTotal == 0
+            && (!('scoredCriterionCount' in data) || data.scoredCriterionCount == 0)
+            && ('conflictReason' in data)
+            && data.conflictReason is string
+            && data.conflictReason.trim().size() >= 1
+          )
+        )
+        && isOptionalString(data, 'humanFeedback', 4000)
+        && isOptionalString(data, 'aiReportSummary', 6000)
+        && isOptionalString(data, 'aiInferenceSource', 60)
+        && data.status in ['draft', 'finalizing', 'submitted']
+        && (!('submittedAt' in data) || data.submittedAt is timestamp)
+        && (data.status != 'submitted' || data.conflictOfInterest || (('scoredCriterionCount' in data) && data.scoredCriterionCount >= 1))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHackathonResults(data) {
+      return data.keys().hasAll(['hackathonId', 'organizerId', 'published', 'rankings', 'updatedAt'])
+        && data.keys().hasOnly(['hackathonId', 'organizerId', 'published', 'rankings', 'publishedAt', 'updatedAt'])
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && data.published is bool
+        && data.rankings is list && data.rankings.size() <= 100
+        && (!('publishedAt' in data) || data.publishedAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'type', 'title', 'message', 'read', 'createdAt'])
+        && data.keys().hasOnly(['id', 'userId', 'type', 'title', 'message', 'link', 'read', 'createdAt'])
+        && isValidId(data.id)
+        && isValidId(data.userId)
+        && data.type in ['registration', 'team_invitation', 'team_accepted', 'deadline', 'submission', 'judge_assignment', 'evaluation', 'results']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 600
+        && (!('link' in data) || isValidInternalLink(data.link))
+        && data.read is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'actorId', 'action', 'targetCollection', 'targetId', 'createdAt'])
+        && data.keys().hasOnly(['id', 'actorId', 'actorName', 'action', 'targetCollection', 'targetId', 'hackathonId', 'details', 'createdAt'])
+        && isValidId(data.id)
+        && isValidId(data.actorId)
+        && isOptionalString(data, 'actorName', 100)
+        && data.action in [
+          'hackathon_created_draft', 'hackathon_created_published', 'hackathon_created_judging', 'hackathon_created_completed',
+          'hackathon_updated_draft', 'hackathon_updated_published', 'hackathon_updated_judging', 'hackathon_updated_completed',
+          'results_published', 'registration_approved', 'registration_rejected',
+          'sponsor_approved', 'sponsor_rejected', 'sponsor_created', 'role_approved'
+        ]
+        && data.targetCollection in ['hackathons', 'hackathonResults', 'registrations', 'sponsors', 'users']
+        && isValidCompositeId(data.targetId)
+        && isOptionalString(data, 'hackathonId', 128)
+        && isOptionalString(data, 'details', 1000)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAIUsage(data) {
+      return data.keys().hasAll(['id', 'userId', 'taskName', 'inferenceSource', 'requestedMode', 'durationMs', 'fallbackOccurred', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'userId', 'taskName', 'inferenceSource', 'requestedMode', 'modelId', 'durationMs', 'fallbackOccurred', 'status', 'createdAt'])
+        && isValidId(data.id)
+        && isValidId(data.userId)
+        && data.taskName is string && data.taskName.size() >= 2 && data.taskName.size() <= 80
+        && data.inferenceSource in ['ON-DEVICE', 'CLOUD', 'LOCAL MODEL UNAVAILABLE', 'FALLBACK TO CLOUD', 'FAILED']
+        && data.requestedMode in ['prefer_on_device', 'prefer_in_cloud', 'only_on_device', 'only_in_cloud']
+        && isOptionalString(data, 'modelId', 120)
+        && data.durationMs is number && data.durationMs >= 0 && data.durationMs <= 600000
+        && data.fallbackOccurred is bool
+        && data.status in ['success', 'failed']
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSponsor(data) {
+      return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'sponsorUserId', 'organizationName', 'tier', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'hackathonId', 'organizerId', 'sponsorUserId', 'organizationName', 'tier', 'status', 'websiteUrl', 'notes', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.hackathonId)
+        && isValidId(data.organizerId)
+        && isValidId(data.sponsorUserId)
+        && data.organizationName is string && data.organizationName.size() >= 1 && data.organizationName.size() <= 120
+        && data.tier in ['platinum', 'gold', 'silver', 'community']
+        && data.status in ['pending', 'approved', 'rejected']
+        && isOptionalHttpUrl(data, 'websiteUrl', 300)
+        && isOptionalString(data, 'notes', 1500)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Collection Match Blocks
+
+    // 1. Admins (Server/Console-only writes; no hardcoded email fallback)
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // 2. Users (Split Collection: Public profile without PII + Owner-only private PII + Separated approvedRole)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isSignedIn();
+      allow list: if isSignedIn() && (
+        resource.data.uid == request.auth.uid ||
+        resource.data.teamPreference in ['looking_for_team', 'open_to_join'] ||
+        resource.data.approvedRole == 'judge' ||
+        isAdmin()
+      );
+      allow create: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().approvedRole == 'participant'
+        && (!('accountRole' in incoming()) || incoming().accountRole == 'participant')
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isVerifiedUser()
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'title', 'bio', 'skills', 'experienceLevel',
+              'interests', 'preferredRoles', 'preferredLanguages', 'availability',
+              'teamPreference', 'portfolioUrl', 'githubUrl', 'linkedinUrl',
+              'photoUrl', 'requestedRole', 'approvedRole', 'updatedAt'
+            ]) &&
+            (
+              (!('approvedRole' in existing()) && incoming().approvedRole == 'participant') ||
+              ('approvedRole' in existing() && incoming().approvedRole == existing().approvedRole)
+            )
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+
+      match /private/{docId} {
+        allow get: if isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create: if isValidId(docId)
+          && isVerifiedUser()
+          && isOwner(userId)
+          && isValidUserPrivateInfo(incoming())
+          && incoming().uid == request.auth.uid
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(docId)
+          && isVerifiedUser()
+          && isValidUserPrivateInfo(incoming())
+          && incoming().uid == existing().uid
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly([
+              'email', 'notificationsEnabled', 'aiCloudConsent', 'preferredLocale', 'updatedAt'
+            ]))
+          );
+        allow delete: if isValidId(docId) && isAdmin();
+      }
+    }
+
+    // 3. Hackathons (Only approved organizers or admins can create/manage)
+    match /hackathons/{hackathonId} {
+      allow get: if isValidId(hackathonId) && (
+        existing().status in ['published', 'judging', 'completed'] ||
+        (isSignedIn() && (existing().organizerId == request.auth.uid || isAdmin()))
+      );
+      allow list: if (
+        resource.data.status in ['published', 'judging', 'completed'] ||
+        (isSignedIn() && (resource.data.organizerId == request.auth.uid || isAdmin()))
+      );
+      allow create: if isValidId(hackathonId)
+        && isApprovedOrganizerOrAdmin()
+        && isValidHackathon(incoming())
+        && incoming().id == hackathonId
+        && incoming().organizerId == request.auth.uid
+        && incoming().resultsPublished == false
+        && incoming().status in ['draft', 'published']
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(hackathonId)
+        && isApprovedOrganizerOrAdmin()
+        && isValidHackathon(incoming())
+        && incoming().id == existing().id
+        && incoming().organizerId == existing().organizerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().organizerId == request.auth.uid &&
+            existing().status != 'completed' &&
+            (
+              incoming().status == existing().status ||
+              (existing().status == 'draft' && incoming().status == 'published') ||
+              (existing().status in ['draft', 'published'] && incoming().status == 'judging') ||
+              (existing().status in ['published', 'judging'] && incoming().status == 'completed')
+            ) &&
+            (
+              incoming().resultsPublished == false ||
+              (
+                incoming().status == 'completed' &&
+                existsAfter(/databases/$(database)/documents/hackathonResults/$(hackathonId)) &&
+                getAfter(/databases/$(database)/documents/hackathonResults/$(hackathonId)).data.published == true
+              )
+            ) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'organizerName', 'title', 'tagline', 'description', 'coverImageUrl',
+              'startDate', 'endDate', 'registrationDeadline', 'submissionDeadline',
+              'registrationDeadlineAt', 'submissionDeadlineAt',
+              'mode', 'location', 'tracks', 'technologies', 'eligibility', 'rules',
+              'prizes', 'sponsors', 'rubric', 'maxTeamSize', 'status', 'resultsPublished', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(hackathonId) && (
+        isAdmin() ||
+        (isApprovedOrganizerOrAdmin() && existing().organizerId == request.auth.uid && existing().status == 'draft')
+      );
+    }
+
+    // 4. Registrations (Auto-approved on eligible create/reapply/pending-upgrade; organizer moderation & rejection lock preserved)
+    match /registrations/{registrationId} {
+      allow get: if isValidCompositeId(registrationId) && isSignedIn() && (
+        (
+          resource != null && (
+            existing().userId == request.auth.uid ||
+            existing().organizerId == request.auth.uid
+          )
+        ) ||
+        (resource == null && canGetMissingOwnRegistration(registrationId)) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidCompositeId(registrationId)
+        && isVerifiedUser()
+        && isValidRegistration(incoming())
+        && incoming().id == registrationId
+        && incoming().id == incoming().hackathonId + '_' + request.auth.uid
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'approved'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/hackathons/$(incoming().hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.organizerId == incoming().organizerId
+        && get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.status == 'published'
+        && (
+          !('registrationDeadlineAt' in get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data) ||
+          request.time <= get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.registrationDeadlineAt
+        );
+      allow update: if isValidCompositeId(registrationId)
+        && isVerifiedUser()
+        && isValidRegistration(incoming())
+        && incoming().id == existing().id
+        && incoming().hackathonId == existing().hackathonId
+        && incoming().organizerId == existing().organizerId
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            isApprovedOrganizerOrAdmin() &&
+            existing().organizerId == request.auth.uid &&
+            incoming().status in ['approved', 'rejected'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          ) ||
+          (
+            existing().userId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['preferredTrack', 'motivation', 'status', 'updatedAt']) &&
+            (
+              (
+                existing().status in ['pending', 'approved'] &&
+                incoming().status in [existing().status, 'withdrawn']
+              ) ||
+              (
+                existing().status in ['pending', 'withdrawn'] &&
+                incoming().status == 'approved' &&
+                exists(/databases/$(database)/documents/hackathons/$(existing().hackathonId)) &&
+                get(/databases/$(database)/documents/hackathons/$(existing().hackathonId)).data.status == 'published' &&
+                (
+                  !('registrationDeadlineAt' in get(/databases/$(database)/documents/hackathons/$(existing().hackathonId)).data) ||
+                  request.time <= get(/databases/$(database)/documents/hackathons/$(existing().hackathonId)).data.registrationDeadlineAt
+                )
+              )
+            )
+          )
+        );
+      allow delete: if isValidCompositeId(registrationId) && (
+        isAdmin() ||
+        (isVerifiedUser() && existing().userId == request.auth.uid && existing().status in ['pending', 'withdrawn'])
+      );
+    }
+
+    // 5. Teams, Cryptographic Join Codes, Join Claims, and Members Subcollection
+    function isValidJoinMemberNamesOnJoin(newData, oldData) {
+      return !('memberNames' in newData)
+        ? !('memberNames' in oldData)
+        : (
+            newData.memberNames is list &&
+            newData.memberNames.size() <= newData.memberIds.size() &&
+            (
+              !('memberNames' in oldData) ||
+              (
+                newData.memberNames.hasAll(oldData.memberNames) &&
+                newData.memberNames.size() >= oldData.memberNames.size() &&
+                newData.memberNames.size() <= oldData.memberNames.size() + 1
+              )
+            )
+          );
+    }
+
+    function isValidJoinClaimForTeamUpdate(hackathonId, claimData) {
+      return claimData.presentedAt == request.time &&
+        (
+          ('registrationId' in claimData &&
+           hasApprovedRegistrationDoc(claimData.registrationId, hackathonId, request.auth.uid)) ||
+          (!('registrationId' in claimData) &&
+           hasApprovedRegistration(hackathonId, request.auth.uid))
+        );
+    }
+
+    function canJoinTeamViaClaim(teamId, newData, oldData) {
+      let claimPath = /databases/$(database)/documents/teams/$(teamId)/joinClaims/$(request.auth.uid);
+      let memberPath = /databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid);
+      let hackPath = /databases/$(database)/documents/hackathons/$(oldData.hackathonId);
+      return oldData.status == 'forming'
+        && !(request.auth.uid in oldData.memberIds)
+        && request.auth.uid in newData.memberIds
+        && newData.diff(oldData).affectedKeys().hasOnly(['memberIds', 'memberNames', 'updatedAt'])
+        && newData.memberIds.hasAll(oldData.memberIds)
+        && newData.memberIds.size() == oldData.memberIds.size() + 1
+        && isValidJoinMemberNamesOnJoin(newData, oldData)
+        && newData.memberIds.size() <= get(hackPath).data.maxTeamSize
+        && existsAfter(claimPath)
+        && isValidJoinClaimForTeamUpdate(oldData.hackathonId, getAfter(claimPath).data)
+        && existsAfter(memberPath);
+    }
+
+    function canLeaveTeam(newData, oldData) {
+      return request.auth.uid in oldData.memberIds
+        && oldData.leaderId != request.auth.uid
+        && !(request.auth.uid in newData.memberIds)
+        && newData.diff(oldData).affectedKeys().hasOnly(['memberIds', 'memberNames', 'updatedAt'])
+        && oldData.memberIds.hasAll(newData.memberIds)
+        && newData.memberIds.size() == oldData.memberIds.size() - 1
+        && (
+          !('memberNames' in newData) ||
+          (
+            newData.memberNames is list &&
+            newData.memberNames.size() <= newData.memberIds.size() &&
+            (!('memberNames' in oldData) || oldData.memberNames.hasAll(newData.memberNames))
+          )
+        );
+    }
+
+    function canUpdateTeam(teamId) {
+      let newData = request.resource.data;
+      let oldData = resource.data;
+      return isValidId(teamId)
+        && isVerifiedUser()
+        && isValidTeam(newData)
+        && newData.id == oldData.id
+        && newData.hackathonId == oldData.hackathonId
+        && newData.organizerId == oldData.organizerId
+        && newData.leaderId == oldData.leaderId
+        && newData.createdAt == oldData.createdAt
+        && newData.updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            oldData.leaderId == request.auth.uid &&
+            newData.diff(oldData).affectedKeys().hasOnly(['name', 'description', 'lookingForRoles', 'track', 'status', 'updatedAt'])
+          ) ||
+          (
+            oldData.leaderId == request.auth.uid &&
+            newData.diff(oldData).affectedKeys().hasOnly(['memberIds', 'memberNames', 'updatedAt']) &&
+            oldData.memberIds.hasAll(newData.memberIds) &&
+            oldData.leaderId in newData.memberIds &&
+            (!('memberNames' in newData) || (newData.memberNames is list && newData.memberNames.size() <= newData.memberIds.size()))
+          ) ||
+          canJoinTeamViaClaim(teamId, newData, oldData) ||
+          canLeaveTeam(newData, oldData)
+        );
+    }
+
+
+    function isValidNewMemberTeamState(teamData, data, memberId) {
+      return memberId in teamData.memberIds
+        && (
+          ('registrationId' in data && hasApprovedRegistrationDoc(data.registrationId, teamData.hackathonId, memberId)) ||
+          (!('registrationId' in data) && (
+            (
+              'registrationId' in teamData &&
+              teamData.leaderId == memberId &&
+              hasApprovedRegistrationDoc(teamData.registrationId, teamData.hackathonId, memberId)
+            ) ||
+            hasApprovedRegistration(teamData.hackathonId, memberId)
+          ))
+        );
+    }
+
+    function canCreateTeamMember(teamId, memberId) {
+      let data = request.resource.data;
+      let teamPath = /databases/$(database)/documents/teams/$(teamId);
+      return isValidId(memberId)
+        && isVerifiedUser()
+        && isValidTeamMember(data)
+        && data.uid == memberId
+        && memberId == request.auth.uid
+        && data.joinedAt == request.time
+        && existsAfter(teamPath)
+        && isValidNewMemberTeamState(getAfter(teamPath).data, data, memberId);
+    }
+
+    match /teams/{teamId} {
+      allow get: if isValidId(teamId) && isSignedIn() && (
+        request.auth.uid in existing().memberIds ||
+        existing().organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        request.auth.uid in resource.data.memberIds ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(teamId)
+        && isVerifiedUser()
+        && isValidTeam(incoming())
+        && incoming().id == teamId
+        && incoming().leaderId == request.auth.uid
+        && incoming().memberIds == [request.auth.uid]
+        && (!('memberNames' in incoming()) || (incoming().memberNames is list && incoming().memberNames.size() == 1))
+        && incoming().status == 'forming'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/hackathons/$(incoming().hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.organizerId == incoming().organizerId
+        && (
+          ('registrationId' in incoming() && hasApprovedRegistrationDoc(incoming().registrationId, incoming().hackathonId, request.auth.uid)) ||
+          (!('registrationId' in incoming()) && hasApprovedRegistration(incoming().hackathonId, request.auth.uid))
+        );
+      allow update: if canUpdateTeam(teamId);
+      allow delete: if isValidId(teamId) && (isAdmin() || (isVerifiedUser() && existing().leaderId == request.auth.uid && existing().status == 'forming'));
+
+      match /private/{docId} {
+        allow get: if isValidId(docId)
+          && docId == 'joinCode'
+          && isVerifiedUser()
+          && (
+            get(/databases/$(database)/documents/teams/$(teamId)).data.leaderId == request.auth.uid ||
+            (
+              isApprovedOrganizerOrAdmin() &&
+              get(/databases/$(database)/documents/teams/$(teamId)).data.organizerId == request.auth.uid
+            ) ||
+            isAdmin()
+          );
+        allow list: if false;
+        allow create: if isValidId(docId)
+          && docId == 'joinCode'
+          && isVerifiedUser()
+          && incoming().keys().hasAll(['verifierHash', 'leaderId', 'active', 'updatedAt'])
+          && incoming().keys().hasOnly(['verifierHash', 'leaderId', 'active', 'updatedAt', 'expiresAt'])
+          && isValidSha256Hex(incoming().verifierHash)
+          && incoming().leaderId == request.auth.uid
+          && incoming().active == true
+          && incoming().updatedAt == request.time
+          && (!('expiresAt' in incoming()) || (incoming().expiresAt is timestamp && incoming().expiresAt > request.time))
+          && getAfter(/databases/$(database)/documents/teams/$(teamId)).data.leaderId == request.auth.uid
+          && existsAfter(/databases/$(database)/documents/teamJoinCodes/$(incoming().verifierHash))
+          && getAfter(/databases/$(database)/documents/teamJoinCodes/$(incoming().verifierHash)).data.teamId == teamId
+          && getAfter(/databases/$(database)/documents/teamJoinCodes/$(incoming().verifierHash)).data.active == true;
+        allow update: if isValidId(docId)
+          && docId == 'joinCode'
+          && isVerifiedUser()
+          && incoming().keys().hasAll(['verifierHash', 'leaderId', 'active', 'updatedAt'])
+          && incoming().keys().hasOnly(['verifierHash', 'leaderId', 'active', 'updatedAt', 'expiresAt'])
+          && isValidSha256Hex(incoming().verifierHash)
+          && incoming().leaderId == existing().leaderId
+          && incoming().active is bool
+          && incoming().updatedAt == request.time
+          && (
+            (
+              existing().leaderId == request.auth.uid &&
+              get(/databases/$(database)/documents/teams/$(teamId)).data.leaderId == request.auth.uid &&
+              (
+                (incoming().active == false && incoming().verifierHash == existing().verifierHash) ||
+                (
+                  incoming().active == true &&
+                  (!('expiresAt' in incoming()) || (incoming().expiresAt is timestamp && incoming().expiresAt > request.time)) &&
+                  existsAfter(/databases/$(database)/documents/teamJoinCodes/$(incoming().verifierHash)) &&
+                  getAfter(/databases/$(database)/documents/teamJoinCodes/$(incoming().verifierHash)).data.teamId == teamId &&
+                  getAfter(/databases/$(database)/documents/teamJoinCodes/$(incoming().verifierHash)).data.active == true
+                )
+              )
+            ) ||
+            (
+              isApprovedOrganizerOrAdmin() &&
+              get(/databases/$(database)/documents/teams/$(teamId)).data.organizerId == request.auth.uid &&
+              incoming().active == false &&
+              incoming().verifierHash == existing().verifierHash &&
+              (!('expiresAt' in incoming()) ? !('expiresAt' in existing()) : ('expiresAt' in existing() && incoming().expiresAt == existing().expiresAt))
+            )
+          );
+        allow delete: if isValidId(docId) && (isAdmin() || (isVerifiedUser() && existing().leaderId == request.auth.uid));
+      }
+
+      match /joinClaims/{claimUid} {
+        function isValidJoinCodeProof(data) {
+          let verifier = hashing.sha256(data.proof).toHexString().lower();
+          return data.keys().hasAll(['uid', 'teamId', 'mode', 'proof', 'presentedAt'])
+            && data.keys().hasOnly(['uid', 'teamId', 'mode', 'proof', 'presentedAt', 'registrationId'])
+            && isValidSha256Hex(data.proof)
+            && exists(/databases/$(database)/documents/teamJoinCodes/$(verifier))
+            && get(/databases/$(database)/documents/teamJoinCodes/$(verifier)).data.teamId == teamId
+            && get(/databases/$(database)/documents/teamJoinCodes/$(verifier)).data.active == true
+            && (
+              !('expiresAt' in get(/databases/$(database)/documents/teamJoinCodes/$(verifier)).data) ||
+              request.time <= get(/databases/$(database)/documents/teamJoinCodes/$(verifier)).data.expiresAt
+            )
+            && exists(/databases/$(database)/documents/teams/$(teamId)/private/joinCode)
+            && get(/databases/$(database)/documents/teams/$(teamId)/private/joinCode).data.verifierHash == verifier
+            && get(/databases/$(database)/documents/teams/$(teamId)/private/joinCode).data.active == true
+            && (
+              !('expiresAt' in get(/databases/$(database)/documents/teams/$(teamId)/private/joinCode).data) ||
+              request.time <= get(/databases/$(database)/documents/teams/$(teamId)/private/joinCode).data.expiresAt
+            );
+        }
+
+        function isValidInvitationDocs(invData, afterInvData) {
+          return invData.toUserId == request.auth.uid
+            && invData.teamId == teamId
+            && invData.status == 'pending'
+            && afterInvData.status == 'accepted';
+        }
+
+        function isValidInvitationClaim(data) {
+          let invPath = /databases/$(database)/documents/teamInvitations/$(data.invitationId);
+          return data.keys().hasAll(['uid', 'teamId', 'mode', 'invitationId', 'presentedAt'])
+            && data.keys().hasOnly(['uid', 'teamId', 'mode', 'invitationId', 'presentedAt', 'registrationId'])
+            && isValidId(data.invitationId)
+            && exists(invPath)
+            && isValidInvitationDocs(get(invPath).data, getAfter(invPath).data);
+        }
+
+        function hasValidClaimTeamAndRegistration(data, teamData) {
+          return (
+            ('registrationId' in data && hasApprovedRegistrationDoc(data.registrationId, teamData.hackathonId, request.auth.uid)) ||
+            (!('registrationId' in data) && hasApprovedRegistration(teamData.hackathonId, request.auth.uid))
+          );
+        }
+
+        function canWriteJoinClaim() {
+          let data = request.resource.data;
+          let teamPath = /databases/$(database)/documents/teams/$(teamId);
+          return isValidId(claimUid)
+            && isVerifiedUser()
+            && isOwner(claimUid)
+            && data.uid == request.auth.uid
+            && data.teamId == teamId
+            && data.presentedAt == request.time
+            && exists(teamPath)
+            && hasValidClaimTeamAndRegistration(data, get(teamPath).data)
+            && request.auth.uid in getAfter(teamPath).data.memberIds
+            && (
+              (data.mode == 'join_code' && isValidJoinCodeProof(data)) ||
+              (data.mode == 'invitation' && isValidInvitationClaim(data))
+            );
+        }
+
+        allow read: if false;
+        allow create, update: if canWriteJoinClaim();
+        allow delete: if isValidId(claimUid) && (isAdmin() || (isVerifiedUser() && isOwner(claimUid)));
+      }
+
+      match /members/{memberId} {
+        allow get: if isValidId(memberId) && isSignedIn() && (
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds ||
+          get(/databases/$(database)/documents/teams/$(teamId)).data.organizerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow list: if isSignedIn() && (
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds ||
+          get(/databases/$(database)/documents/teams/$(teamId)).data.organizerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create: if canCreateTeamMember(teamId, memberId);
+        allow update: if isValidId(memberId)
+          && isVerifiedUser()
+          && isValidTeamMember(incoming())
+          && incoming().uid == existing().uid
+          && incoming().joinedAt == existing().joinedAt
+          && (
+            isAdmin() ||
+            (get(/databases/$(database)/documents/teams/$(teamId)).data.leaderId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['roleInTeam'])) ||
+            (memberId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['roleInTeam']))
+          );
+        allow delete: if isValidId(memberId) && (
+          isAdmin() ||
+          (
+            isVerifiedUser() &&
+            (memberId == request.auth.uid || get(/databases/$(database)/documents/teams/$(teamId)).data.leaderId == request.auth.uid) &&
+            (
+              !existsAfter(/databases/$(database)/documents/teams/$(teamId)) ||
+              !(memberId in getAfter(/databases/$(database)/documents/teams/$(teamId)).data.memberIds)
+            )
+          )
+        );
+      }
+    }
+
+    // 5b. Team Join Code Double-Hash Verifier Index (Exact SHA256(SHA256(token)) get only; list forbidden)
+    match /teamJoinCodes/{verifierHash} {
+      allow get: if isVerifiedUser() && isValidSha256Hex(verifierHash);
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidSha256Hex(verifierHash)
+        && incoming().keys().hasAll(['id', 'verifierHash', 'teamId', 'hackathonId', 'organizerId', 'leaderId', 'active', 'createdAt'])
+        && incoming().keys().hasOnly(['id', 'verifierHash', 'teamId', 'hackathonId', 'organizerId', 'leaderId', 'active', 'createdAt', 'expiresAt'])
+        && incoming().id == verifierHash
+        && incoming().verifierHash == verifierHash
+        && isValidId(incoming().teamId)
+        && incoming().leaderId == request.auth.uid
+        && incoming().active == true
+        && incoming().createdAt == request.time
+        && (!('expiresAt' in incoming()) || (incoming().expiresAt is timestamp && incoming().expiresAt > request.time))
+        && existsAfter(/databases/$(database)/documents/teams/$(incoming().teamId))
+        && getAfter(/databases/$(database)/documents/teams/$(incoming().teamId)).data.leaderId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/teams/$(incoming().teamId)).data.hackathonId == incoming().hackathonId
+        && getAfter(/databases/$(database)/documents/teams/$(incoming().teamId)).data.organizerId == incoming().organizerId
+        && existsAfter(/databases/$(database)/documents/teams/$(incoming().teamId)/private/joinCode)
+        && getAfter(/databases/$(database)/documents/teams/$(incoming().teamId)/private/joinCode).data.leaderId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/teams/$(incoming().teamId)/private/joinCode).data.verifierHash == verifierHash
+        && getAfter(/databases/$(database)/documents/teams/$(incoming().teamId)/private/joinCode).data.active == true;
+      allow update: if isValidSha256Hex(verifierHash) && (
+        isAdmin() ||
+        (
+          isVerifiedUser() &&
+          (
+            (
+              existing().leaderId == request.auth.uid &&
+              get(/databases/$(database)/documents/teams/$(existing().teamId)).data.leaderId == request.auth.uid
+            ) ||
+            (
+              isApprovedOrganizerOrAdmin() &&
+              existing().organizerId == request.auth.uid &&
+              get(/databases/$(database)/documents/teams/$(existing().teamId)).data.organizerId == request.auth.uid
+            )
+          ) &&
+          incoming().active == false &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['active'])
+        )
+      );
+      allow delete: if isValidSha256Hex(verifierHash) && (
+        isAdmin() ||
+        (
+          isVerifiedUser() &&
+          existing().leaderId == request.auth.uid &&
+          (
+            !exists(/databases/$(database)/documents/teams/$(existing().teamId)) ||
+            get(/databases/$(database)/documents/teams/$(existing().teamId)).data.leaderId == request.auth.uid
+          )
+        )
+      );
+    }
+
+    // 6. Team Invitations
+    function isValidInvitationAcceptClaim(hackathonId, claimData) {
+      return claimData.mode == 'invitation' &&
+        (
+          ('registrationId' in claimData &&
+           hasApprovedRegistrationDoc(claimData.registrationId, hackathonId, request.auth.uid)) ||
+          (!('registrationId' in claimData) &&
+           hasApprovedRegistration(hackathonId, request.auth.uid))
+        );
+    }
+
+    function isValidInvitationCreateTeam(data, teamData) {
+      return teamData.status == 'forming'
+        && teamData.hackathonId == data.hackathonId
+        && request.auth.uid in teamData.memberIds
+        && (
+          hasApprovedRegistration(data.hackathonId, request.auth.uid) ||
+          (
+            'registrationId' in teamData &&
+            teamData.leaderId == request.auth.uid &&
+            hasApprovedRegistrationDoc(teamData.registrationId, data.hackathonId, request.auth.uid)
+          )
+        );
+    }
+
+    function canCreateTeamInvitation(invitationId) {
+      let data = request.resource.data;
+      let teamPath = /databases/$(database)/documents/teams/$(data.teamId);
+      return isValidId(invitationId)
+        && isVerifiedUser()
+        && isValidTeamInvitation(data)
+        && data.id == invitationId
+        && data.fromUserId == request.auth.uid
+        && data.toUserId != request.auth.uid
+        && data.status == 'pending'
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && exists(teamPath)
+        && isValidInvitationCreateTeam(data, get(teamPath).data);
+    }
+
+    function canUpdateTeamInvitation(invitationId) {
+      let newData = request.resource.data;
+      let oldData = resource.data;
+      let claimPath = /databases/$(database)/documents/teams/$(oldData.teamId)/joinClaims/$(request.auth.uid);
+      let teamPath = /databases/$(database)/documents/teams/$(oldData.teamId);
+      return isValidId(invitationId)
+        && isVerifiedUser()
+        && isValidTeamInvitation(newData)
+        && newData.id == oldData.id
+        && newData.hackathonId == oldData.hackathonId
+        && newData.teamId == oldData.teamId
+        && newData.fromUserId == oldData.fromUserId
+        && newData.toUserId == oldData.toUserId
+        && newData.createdAt == oldData.createdAt
+        && newData.updatedAt == request.time
+        && oldData.status == 'pending'
+        && (
+          isAdmin() ||
+          (
+            oldData.toUserId == request.auth.uid &&
+            newData.status == 'accepted' &&
+            newData.diff(oldData).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+            existsAfter(claimPath) &&
+            isValidInvitationAcceptClaim(oldData.hackathonId, getAfter(claimPath).data) &&
+            request.auth.uid in getAfter(teamPath).data.memberIds
+          ) ||
+          (
+            oldData.toUserId == request.auth.uid &&
+            newData.status == 'rejected' &&
+            newData.diff(oldData).affectedKeys().hasOnly(['status', 'updatedAt'])
+          ) ||
+          (
+            oldData.fromUserId == request.auth.uid &&
+            newData.status == 'cancelled' &&
+            newData.diff(oldData).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+    }
+
+    match /teamInvitations/{invitationId} {
+      allow get: if isValidId(invitationId) && isSignedIn() && (
+        existing().fromUserId == request.auth.uid ||
+        existing().toUserId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if canCreateTeamInvitation(invitationId);
+      allow update: if canUpdateTeamInvitation(invitationId);
+      allow delete: if isValidId(invitationId) && isAdmin();
+    }
+
+    // 7. Projects
+    match /projects/{projectId} {
+      allow get: if isValidId(projectId) && isSignedIn() && (
+        request.auth.uid in existing().memberIds ||
+        existing().organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        request.auth.uid in resource.data.memberIds ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(projectId)
+        && isVerifiedUser()
+        && isValidProject(incoming())
+        && incoming().id == projectId
+        && incoming().ownerId == request.auth.uid
+        && request.auth.uid in incoming().memberIds
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/teams/$(incoming().teamId))
+        && get(/databases/$(database)/documents/teams/$(incoming().teamId)).data.hackathonId == incoming().hackathonId
+        && get(/databases/$(database)/documents/teams/$(incoming().teamId)).data.organizerId == incoming().organizerId
+        && request.auth.uid in get(/databases/$(database)/documents/teams/$(incoming().teamId)).data.memberIds
+        && get(/databases/$(database)/documents/teams/$(incoming().teamId)).data.memberIds.hasAll(incoming().memberIds);
+      allow update: if isValidId(projectId)
+        && isVerifiedUser()
+        && isValidProject(incoming())
+        && incoming().id == existing().id
+        && incoming().hackathonId == existing().hackathonId
+        && incoming().organizerId == existing().organizerId
+        && incoming().teamId == existing().teamId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            request.auth.uid in existing().memberIds &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'problemStatement', 'proposedSolution', 'targetUsers',
+              'technologies', 'roadmap', 'tasks', 'notes', 'aiMentorApprovedSummary',
+              'memberIds', 'status', 'updatedAt'
+            ]) &&
+            (
+              !incoming().diff(existing()).affectedKeys().hasAny(['memberIds']) ||
+              (
+                existing().ownerId == request.auth.uid &&
+                existing().ownerId in incoming().memberIds &&
+                get(/databases/$(database)/documents/teams/$(existing().teamId)).data.memberIds.hasAll(incoming().memberIds)
+              )
+            )
+          )
+        );
+      allow delete: if isValidId(projectId) && (isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid && existing().status != 'submitted'));
+    }
+
+    // 8. Submissions (Blind Judging: assignedJudgeIds omitted; judges access via judgeAssignments)
+    match /submissions/{submissionId} {
+      function isSubmissionHackathonOpen(hackId) {
+        let hackPath = /databases/$(database)/documents/hackathons/$(hackId);
+        return get(hackPath).data.status == 'published' &&
+          (
+            !('submissionDeadlineAt' in get(hackPath).data) ||
+            request.time <= get(/databases/$(database)/documents/hackathons/$(hackId)).data.submissionDeadlineAt
+          );
+      }
+
+      function isValidSubmissionCreateDocs(data, hackData, teamData, projData) {
+        return hackData.organizerId == data.organizerId
+          && isSubmissionHackathonOpen(data.hackathonId)
+          && teamData.hackathonId == data.hackathonId
+          && request.auth.uid in teamData.memberIds
+          && teamData.memberIds.hasAll(data.memberIds)
+          && projData.teamId == data.teamId
+          && projData.hackathonId == data.hackathonId;
+      }
+
+      function isValidSubmissionCreateRefs(data) {
+        let hackPath = /databases/$(database)/documents/hackathons/$(data.hackathonId);
+        let teamPath = /databases/$(database)/documents/teams/$(data.teamId);
+        let projPath = /databases/$(database)/documents/projects/$(data.projectId);
+        return exists(hackPath)
+          && exists(teamPath)
+          && exists(projPath)
+          && isValidSubmissionCreateDocs(data, get(hackPath).data, get(teamPath).data, get(projPath).data);
+      }
+
+      function canCreateSubmission() {
+        let data = request.resource.data;
+        return isValidId(submissionId)
+          && isVerifiedUser()
+          && !('assignedJudgeIds' in data)
+          && data.id == submissionId
+          && data.ownerId == request.auth.uid
+          && data.status in ['draft', 'submitted']
+          && (data.status != 'submitted' || data.submittedAt == request.time)
+          && data.createdAt == request.time
+          && data.updatedAt == request.time
+          && isValidSubmission(data)
+          && request.auth.uid in data.memberIds
+          && isValidSubmissionCreateRefs(data);
+      }
+
+      function canUpdateSubmission() {
+        let newData = request.resource.data;
+        let oldData = resource.data;
+        return isValidId(submissionId)
+          && isVerifiedUser()
+          && newData.id == oldData.id
+          && newData.hackathonId == oldData.hackathonId
+          && newData.organizerId == oldData.organizerId
+          && newData.teamId == oldData.teamId
+          && newData.projectId == oldData.projectId
+          && newData.ownerId == oldData.ownerId
+          && newData.createdAt == oldData.createdAt
+          && newData.updatedAt == request.time
+          && (
+            isAdmin() ||
+            (
+              isApprovedOrganizerOrAdmin() &&
+              oldData.organizerId == request.auth.uid &&
+              newData.diff(oldData).affectedKeys().hasOnly(['status', 'updatedAt'])
+            ) ||
+            (
+              request.auth.uid in oldData.memberIds &&
+              oldData.status in ['draft', 'submitted'] &&
+              (oldData.status == 'draft' || newData.status == 'submitted') &&
+              (newData.status != 'submitted' || oldData.status == 'submitted' || newData.submittedAt == request.time) &&
+              newData.status in ['draft', 'submitted'] &&
+              newData.diff(oldData).affectedKeys().hasOnly([
+                'title', 'shortDescription', 'fullDescription', 'problemStatement',
+                'proposedSolution', 'technologies', 'githubUrl', 'demoUrl',
+                'videoUrl', 'screenshotUrls', 'track', 'status', 'submittedAt', 'updatedAt'
+              ]) &&
+              isSubmissionHackathonOpen(oldData.hackathonId)
+            )
+          )
+          && isValidSubmission(newData);
+      }
+
+      allow get: if isValidId(submissionId) && isSignedIn() && (
+        request.auth.uid in existing().memberIds ||
+        existing().organizerId == request.auth.uid ||
+        (
+          exists(/databases/$(database)/documents/judgeAssignments/$(existing().hackathonId + '_' + request.auth.uid)) &&
+          get(/databases/$(database)/documents/judgeAssignments/$(existing().hackathonId + '_' + request.auth.uid)).data.status != 'declined' &&
+          submissionId in get(/databases/$(database)/documents/judgeAssignments/$(existing().hackathonId + '_' + request.auth.uid)).data.assignedSubmissionIds
+        ) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        request.auth.uid in resource.data.memberIds ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if canCreateSubmission();
+      allow update: if canUpdateSubmission();
+      allow delete: if isValidId(submissionId) && isAdmin();
+    }
+
+    // 9. Judge Assignments
+    match /judgeAssignments/{assignmentId} {
+      allow get: if isValidCompositeId(assignmentId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (existing().judgeId == request.auth.uid || existing().organizerId == request.auth.uid)) ||
+        (resource == null && canOrganizerGetMissingAssignment(assignmentId))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.judgeId == request.auth.uid ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidCompositeId(assignmentId)
+        && isApprovedOrganizerOrAdmin()
+        && isValidJudgeAssignment(incoming())
+        && incoming().id == assignmentId
+        && incoming().id == incoming().hackathonId + '_' + incoming().judgeId
+        && incoming().status == 'invited'
+        && incoming().conflictDeclared == false
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/hackathons/$(incoming().hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.organizerId == request.auth.uid
+        && incoming().organizerId == request.auth.uid;
+      allow update: if isValidCompositeId(assignmentId)
+        && isVerifiedUser()
+        && isValidJudgeAssignment(incoming())
+        && incoming().id == existing().id
+        && incoming().hackathonId == existing().hackathonId
+        && incoming().organizerId == existing().organizerId
+        && incoming().judgeId == existing().judgeId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            isApprovedOrganizerOrAdmin() &&
+            existing().organizerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['assignedSubmissionIds', 'updatedAt'])
+          ) ||
+          (
+            existing().judgeId == request.auth.uid &&
+            (existing().status != 'declined' || incoming().status == 'declined') &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['conflictDeclared', 'conflictNotes', 'status', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidCompositeId(assignmentId) && (
+        isAdmin() ||
+        (isApprovedOrganizerOrAdmin() && existing().organizerId == request.auth.uid)
+      );
+    }
+
+    // 10. Evaluations (Normalized subcollection /criteria/{criterionId} + draft -> finalizing -> submitted)
+    match /evaluations/{evaluationId} {
+      allow get: if isValidCompositeId(evaluationId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (existing().judgeId == request.auth.uid || existing().organizerId == request.auth.uid)) ||
+        (resource == null && canGetMissingEvaluation(evaluationId))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.judgeId == request.auth.uid ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      function hasValidSubmissionForEvaluation(subPath, data) {
+        let sub = get(subPath).data;
+        return sub.organizerId == data.organizerId
+          && sub.hackathonId == data.hackathonId
+          && sub.status in ['submitted', 'under_review', 'evaluated'];
+      }
+
+      function hasAcceptedUnconflictedAssignment(hackathonId, submissionId) {
+        let assignPath = /databases/$(database)/documents/judgeAssignments/$(hackathonId + '_' + request.auth.uid);
+        return exists(assignPath) && hasAcceptedUnconflictedAssignmentData(get(assignPath).data, submissionId);
+      }
+
+      function hasAcceptedUnconflictedAssignmentData(assign, submissionId) {
+        return assign.status == 'accepted'
+          && assign.conflictDeclared == false
+          && submissionId in assign.assignedSubmissionIds;
+      }
+
+      function canFinalizeWithHackathon(evalId, hack, data) {
+        return hack.status in ['published', 'judging', 'completed']
+          && ('rubric' in hack)
+          && hack.rubric is list
+          && hack.rubric.size() >= 1
+          && hack.rubric.size() <= 12
+          && ('scoredCriterionCount' in data)
+          && data.scoredCriterionCount == hack.rubric.size()
+          && isValidId(hack.rubric[0].id)
+          && exists(/databases/$(database)/documents/evaluations/$(evalId)/criteria/$(hack.rubric[0].id))
+          && (
+            hack.rubric.size() == 1 || (
+              isValidId(hack.rubric[hack.rubric.size() - 1].id)
+              && exists(/databases/$(database)/documents/evaluations/$(evalId)/criteria/$(hack.rubric[hack.rubric.size() - 1].id))
+            )
+          );
+      }
+
+      function canFinalizeNonCoiEvaluation(evalId, hackathonId, data) {
+        return data.status != 'submitted'
+          || data.conflictOfInterest
+          || (
+            exists(/databases/$(database)/documents/hackathons/$(hackathonId))
+            && canFinalizeWithHackathon(evalId, get(/databases/$(database)/documents/hackathons/$(hackathonId)).data, data)
+          );
+      }
+
+      allow create: if isValidCompositeId(evaluationId)
+        && isVerifiedUser()
+        && isValidEvaluation(incoming())
+        && incoming().id == evaluationId
+        && incoming().id == incoming().submissionId + '_' + request.auth.uid
+        && incoming().judgeId == request.auth.uid
+        && canFinalizeNonCoiEvaluation(evaluationId, incoming().hackathonId, incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/submissions/$(incoming().submissionId))
+        && !(request.auth.uid in get(/databases/$(database)/documents/submissions/$(incoming().submissionId)).data.memberIds)
+        && hasValidSubmissionForEvaluation(/databases/$(database)/documents/submissions/$(incoming().submissionId), incoming())
+        && hasAcceptedUnconflictedAssignment(incoming().hackathonId, incoming().submissionId);
+      allow update: if isValidCompositeId(evaluationId)
+        && isVerifiedUser()
+        && isValidEvaluation(incoming())
+        && incoming().id == existing().id
+        && incoming().hackathonId == existing().hackathonId
+        && incoming().organizerId == existing().organizerId
+        && incoming().submissionId == existing().submissionId
+        && incoming().judgeId == existing().judgeId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().judgeId == request.auth.uid &&
+            existing().status in ['draft', 'finalizing'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'criteriaScores', 'weightedTotal', 'scoredCriterionCount', 'storageSchema',
+              'conflictOfInterest', 'conflictReason', 'humanFeedback',
+              'aiReportSummary', 'aiInferenceSource', 'status', 'submittedAt', 'updatedAt'
+            ]) &&
+            hasAcceptedUnconflictedAssignment(existing().hackathonId, existing().submissionId) &&
+            canFinalizeNonCoiEvaluation(evaluationId, existing().hackathonId, incoming())
+          ) ||
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+      allow delete: if isValidCompositeId(evaluationId) && isAdmin();
+
+      match /criteria/{criterionId} {
+        function canReadParentEvalData(parent) {
+          return parent.judgeId == request.auth.uid || parent.organizerId == request.auth.uid;
+        }
+
+        function canMutateCriterionWithParent(parent, evalId, critId, data) {
+          return parent.judgeId == request.auth.uid
+            && parent.status in ['draft', 'finalizing']
+            && parent.conflictOfInterest == false
+            && data.hackathonId == parent.hackathonId
+            && data.submissionId == parent.submissionId
+            && data.judgeId == parent.judgeId
+            && hasAcceptedUnconflictedAssignment(parent.hackathonId, parent.submissionId)
+            && exists(/databases/$(database)/documents/hackathons/$(parent.hackathonId))
+            && matchesAnyHackathonRubricItem(
+              get(/databases/$(database)/documents/hackathons/$(parent.hackathonId)).data,
+              critId,
+              data.weight
+            );
+        }
+
+        function canDeleteCriterionWithParent(parent) {
+          return parent.judgeId == request.auth.uid
+            && parent.status in ['draft', 'finalizing']
+            && hasAcceptedUnconflictedAssignment(parent.hackathonId, parent.submissionId);
+        }
+
+        allow get: if isValidId(criterionId) && isSignedIn() && (
+          (
+            exists(/databases/$(database)/documents/evaluations/$(evaluationId)) &&
+            canReadParentEvalData(get(/databases/$(database)/documents/evaluations/$(evaluationId)).data)
+          ) ||
+          isAdmin()
+        );
+        allow list: if isSignedIn() && (
+          (
+            exists(/databases/$(database)/documents/evaluations/$(evaluationId)) &&
+            canReadParentEvalData(get(/databases/$(database)/documents/evaluations/$(evaluationId)).data)
+          ) ||
+          isAdmin()
+        );
+        allow create, update: if isValidCompositeId(evaluationId)
+          && isValidId(criterionId)
+          && isVerifiedUser()
+          && isValidEvaluationCriterionDoc(incoming(), evaluationId, criterionId)
+          && incoming().updatedAt == request.time
+          && (
+            (
+              exists(/databases/$(database)/documents/evaluations/$(evaluationId)) &&
+              canMutateCriterionWithParent(
+                get(/databases/$(database)/documents/evaluations/$(evaluationId)).data,
+                evaluationId,
+                criterionId,
+                incoming()
+              )
+            ) ||
+            isAdmin()
+          );
+        allow delete: if isValidCompositeId(evaluationId)
+          && isValidId(criterionId)
+          && isVerifiedUser()
+          && (
+            (
+              exists(/databases/$(database)/documents/evaluations/$(evaluationId)) &&
+              canDeleteCriterionWithParent(get(/databases/$(database)/documents/evaluations/$(evaluationId)).data)
+            ) ||
+            isAdmin()
+          );
+      }
+    }
+
+    // 11. Hackathon Results (Atomic publication + immutable once published for non-admins)
+    match /hackathonResults/{hackathonId} {
+      allow get: if isValidId(hackathonId) && (
+        (resource != null && existing().published == true) ||
+        (isSignedIn() && (
+          isAdmin() ||
+          (resource != null && existing().organizerId == request.auth.uid) ||
+          (
+            resource == null &&
+            isApprovedOrganizerOrAdmin() &&
+            exists(/databases/$(database)/documents/hackathons/$(hackathonId)) &&
+            get(/databases/$(database)/documents/hackathons/$(hackathonId)).data.organizerId == request.auth.uid
+          )
+        ))
+      );
+      allow list: if resource.data.published == true || (isSignedIn() && (resource.data.organizerId == request.auth.uid || isAdmin()));
+      allow create: if isValidId(hackathonId)
+        && isApprovedOrganizerOrAdmin()
+        && isValidHackathonResults(incoming())
+        && incoming().hackathonId == hackathonId
+        && incoming().organizerId == request.auth.uid
+        && incoming().updatedAt == request.time
+        && (
+          !incoming().published ||
+          (
+            incoming().publishedAt == request.time &&
+            getAfter(/databases/$(database)/documents/hackathons/$(hackathonId)).data.resultsPublished == true &&
+            getAfter(/databases/$(database)/documents/hackathons/$(hackathonId)).data.status == 'completed'
+          )
+        )
+        && exists(/databases/$(database)/documents/hackathons/$(hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(hackathonId)).data.organizerId == request.auth.uid;
+      allow update: if isValidId(hackathonId)
+        && isApprovedOrganizerOrAdmin()
+        && isValidHackathonResults(incoming())
+        && incoming().hackathonId == existing().hackathonId
+        && incoming().organizerId == existing().organizerId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().organizerId == request.auth.uid &&
+            existing().published == false &&
+            (
+              !incoming().published ||
+              (
+                incoming().publishedAt == request.time &&
+                getAfter(/databases/$(database)/documents/hackathons/$(hackathonId)).data.resultsPublished == true &&
+                getAfter(/databases/$(database)/documents/hackathons/$(hackathonId)).data.status == 'completed'
+              )
+            ) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['published', 'rankings', 'publishedAt', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(hackathonId) && isAdmin();
+    }
+
+    // 12. Notifications (Self-scoped only; cross-user derived via authoritative collections)
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isValidId(notificationId)
+        && isVerifiedUser()
+        && isValidNotification(incoming())
+        && incoming().id == notificationId
+        && incoming().userId == request.auth.uid
+        && incoming().read == false
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(notificationId)
+        && isVerifiedUser()
+        && isValidNotification(incoming())
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && (isAdmin() || (existing().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['read'])));
+      allow delete: if isValidId(notificationId) && (isAdmin() || (isVerifiedUser() && existing().userId == request.auth.uid));
+    }
+
+    // 13. Audit Logs (Append-only with strict action/collection allowlists)
+    match /auditLogs/{logId} {
+      allow get: if isValidId(logId) && isSignedIn() && (existing().actorId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.actorId == request.auth.uid || isAdmin());
+      allow create: if isValidId(logId)
+        && isVerifiedUser()
+        && isValidAuditLog(incoming())
+        && incoming().id == logId
+        && incoming().actorId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // 14. AI Usage Telemetry (Append-only with bounded duration)
+    match /aiUsage/{usageId} {
+      allow get: if isValidId(usageId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isValidId(usageId)
+        && isVerifiedUser()
+        && isValidAIUsage(incoming())
+        && incoming().id == usageId
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // 15. Sponsors (Pending-only request for sponsors; organizer approval required for tier/status)
+    match /sponsors/{sponsorId} {
+      allow get: if isValidId(sponsorId) && isSignedIn() && (
+        existing().sponsorUserId == request.auth.uid ||
+        existing().organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.sponsorUserId == request.auth.uid ||
+        resource.data.organizerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(sponsorId)
+        && isVerifiedUser()
+        && isValidSponsor(incoming())
+        && incoming().id == sponsorId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/hackathons/$(incoming().hackathonId))
+        && get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.organizerId == incoming().organizerId
+        && get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.status in ['published', 'judging', 'completed']
+        && (
+          (
+            isApprovedOrganizerOrAdmin() &&
+            get(/databases/$(database)/documents/hackathons/$(incoming().hackathonId)).data.organizerId == request.auth.uid
+          ) ||
+          (
+            incoming().sponsorUserId == request.auth.uid &&
+            incoming().status == 'pending' &&
+            incoming().tier == 'community'
+          )
+        );
+      allow update: if isValidId(sponsorId)
+        && isVerifiedUser()
+        && isValidSponsor(incoming())
+        && incoming().id == existing().id
+        && incoming().hackathonId == existing().hackathonId
+        && incoming().organizerId == existing().organizerId
+        && incoming().sponsorUserId == existing().sponsorUserId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            isApprovedOrganizerOrAdmin() &&
+            existing().organizerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['organizationName', 'tier', 'status', 'websiteUrl', 'notes', 'updatedAt'])
+          ) ||
+          (
+            existing().sponsorUserId == request.auth.uid &&
+            existing().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['organizationName', 'websiteUrl', 'notes', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(sponsorId) && (
+        isAdmin() ||
+        (isApprovedOrganizerOrAdmin() && existing().organizerId == request.auth.uid)
+      );
+    }
+  }
+}

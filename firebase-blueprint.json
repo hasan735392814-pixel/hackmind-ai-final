@@ -1,0 +1,501 @@
+{
+  "entities": {
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Server-provisioned platform administrator marker.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "grantedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "grantedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public builder, organizer, judge, or sponsor profile without PII.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "title": { "type": "string", "maxLength": 100 },
+        "bio": { "type": "string", "maxLength": 1000 },
+        "skills": { "type": "array" },
+        "experienceLevel": { "type": "string", "enum": ["beginner", "intermediate", "advanced", "expert"] },
+        "interests": { "type": "array" },
+        "preferredRoles": { "type": "array" },
+        "preferredLanguages": { "type": "array" },
+        "availability": { "type": "string", "enum": ["part_time", "full_time", "weekends_only"] },
+        "teamPreference": { "type": "string", "enum": ["looking_for_team", "open_to_join", "already_have_team", "solo"] },
+        "portfolioUrl": { "type": "string", "maxLength": 300 },
+        "githubUrl": { "type": "string", "maxLength": 300 },
+        "linkedinUrl": { "type": "string", "maxLength": 300 },
+        "photoUrl": { "type": "string", "maxLength": 500 },
+        "requestedRole": { "type": "string", "enum": ["participant", "organizer", "judge", "sponsor"] },
+        "approvedRole": { "type": "string", "enum": ["participant", "organizer", "judge", "sponsor"] },
+        "accountRole": { "type": "string", "enum": ["participant", "organizer", "judge", "sponsor"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "requestedRole", "approvedRole", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Private user PII and consent settings isolated from public reads.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "notificationsEnabled": { "type": "boolean" },
+        "aiCloudConsent": { "type": "boolean" },
+        "preferredLocale": { "type": "string", "enum": ["en", "ar"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "notificationsEnabled", "aiCloudConsent", "preferredLocale", "updatedAt"]
+    },
+    "Hackathon": {
+      "title": "Hackathon",
+      "description": "Hackathon competition configuration, rubric, and publication lifecycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 140 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "minLength": 10, "maxLength": 8000 },
+        "coverImageUrl": { "type": "string", "maxLength": 500 },
+        "startDate": { "type": "string", "maxLength": 40 },
+        "endDate": { "type": "string", "maxLength": 40 },
+        "registrationDeadline": { "type": "string", "maxLength": 40 },
+        "submissionDeadline": { "type": "string", "maxLength": 40 },
+        "registrationDeadlineAt": { "type": "string", "format": "date-time" },
+        "submissionDeadlineAt": { "type": "string", "format": "date-time" },
+        "mode": { "type": "string", "enum": ["online", "in_person", "hybrid"] },
+        "location": { "type": "string", "maxLength": 200 },
+        "tracks": { "type": "array" },
+        "technologies": { "type": "array" },
+        "eligibility": { "type": "string", "maxLength": 3000 },
+        "rules": { "type": "string", "maxLength": 6000 },
+        "prizes": { "type": "array" },
+        "sponsors": { "type": "array" },
+        "rubric": { "type": "array" },
+        "maxTeamSize": { "type": "integer" },
+        "status": { "type": "string", "enum": ["draft", "published", "judging", "completed"] },
+        "resultsPublished": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "organizerId", "organizerName", "title", "description", "mode", "maxTeamSize", "status", "resultsPublished", "createdAt", "updatedAt"]
+    },
+    "HackathonRegistration": {
+      "title": "HackathonRegistration",
+      "description": "Participant registration for a specific hackathon.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "userTitle": { "type": "string", "maxLength": 100 },
+        "preferredTrack": { "type": "string", "maxLength": 100 },
+        "motivation": { "type": "string", "maxLength": 1500 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "withdrawn"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "userId", "userName", "status", "createdAt", "updatedAt"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Builder team competing in a hackathon.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "registrationId": { "type": "string", "minLength": 1, "maxLength": 257, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 600 },
+        "leaderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "memberNames": { "type": "array" },
+        "lookingForRoles": { "type": "array" },
+        "track": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["forming", "locked", "submitted"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "name", "leaderId", "memberIds", "status", "createdAt", "updatedAt"]
+    },
+    "TeamJoinCodeSecret": {
+      "title": "TeamJoinCodeSecret",
+      "description": "Leader-only join-code status and double-hash verifier metadata (zero plaintext secret).",
+      "type": "object",
+      "properties": {
+        "verifierHash": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "leaderId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["verifierHash", "leaderId", "active", "updatedAt"]
+    },
+    "TeamJoinCodeIndex": {
+      "title": "TeamJoinCodeIndex",
+      "description": "Double SHA-256 verifier hash lookup index (SHA256(SHA256(token))) allowing zero-enumeration, zero-plaintext lookups.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "verifierHash": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "teamId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "leaderId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "verifierHash", "teamId", "hackathonId", "organizerId", "leaderId", "active", "createdAt"]
+    },
+    "TeamJoinClaim": {
+      "title": "TeamJoinClaim",
+      "description": "Write-only atomic claim presenting SHA256(token) proof or accepted invitationId, purged post-commit.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "teamId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "mode": { "type": "string", "enum": ["join_code", "invitation"] },
+        "proof": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "invitationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "registrationId": { "type": "string", "minLength": 1, "maxLength": 257, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "presentedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "teamId", "mode", "presentedAt"]
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Relational member subcollection entry under a team.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "roleInTeam": { "type": "string", "maxLength": 80 },
+        "registrationId": { "type": "string", "minLength": 1, "maxLength": 257, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "roleInTeam", "joinedAt"]
+    },
+    "TeamInvitation": {
+      "title": "TeamInvitation",
+      "description": "Invitation sent to a participant to join a team.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teamId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teamName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fromUserId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fromUserName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "toUserId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "toUserName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "roleOffered": { "type": "string", "maxLength": 80 },
+        "message": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teamId", "teamName", "hackathonId", "fromUserId", "toUserId", "status", "createdAt", "updatedAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Builder workspace project with tasks, roadmap, and AI mentor outputs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teamId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "problemStatement": { "type": "string", "maxLength": 3000 },
+        "proposedSolution": { "type": "string", "maxLength": 4000 },
+        "targetUsers": { "type": "string", "maxLength": 1000 },
+        "technologies": { "type": "array" },
+        "roadmap": { "type": "array" },
+        "tasks": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 5000 },
+        "aiMentorApprovedSummary": { "type": "string", "maxLength": 5000 },
+        "status": { "type": "string", "enum": ["ideation", "building", "submitted"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "teamId", "ownerId", "memberIds", "title", "status", "createdAt", "updatedAt"]
+    },
+    "ProjectSubmission": {
+      "title": "ProjectSubmission",
+      "description": "Formal hackathon project submission evaluated by assigned judges.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teamId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teamName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "projectId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "memberNames": { "type": "array" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "shortDescription": { "type": "string", "minLength": 5, "maxLength": 300 },
+        "fullDescription": { "type": "string", "maxLength": 8000 },
+        "problemStatement": { "type": "string", "maxLength": 3000 },
+        "proposedSolution": { "type": "string", "maxLength": 4000 },
+        "technologies": { "type": "array" },
+        "githubUrl": { "type": "string", "maxLength": 300 },
+        "demoUrl": { "type": "string", "maxLength": 300 },
+        "videoUrl": { "type": "string", "maxLength": 300 },
+        "screenshotUrls": { "type": "array" },
+        "track": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["draft", "submitted", "under_review", "evaluated"] },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "teamId", "projectId", "ownerId", "memberIds", "title", "shortDescription", "status", "createdAt", "updatedAt"]
+    },
+    "JudgeAssignment": {
+      "title": "JudgeAssignment",
+      "description": "Organizer assignment of a judge to a hackathon and submissions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "judgeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "judgeName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "assignedSubmissionIds": { "type": "array" },
+        "conflictDeclared": { "type": "boolean" },
+        "conflictNotes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["invited", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "judgeId", "judgeName", "assignedSubmissionIds", "conflictDeclared", "status", "createdAt", "updatedAt"]
+    },
+    "Evaluation": {
+      "title": "Evaluation",
+      "description": "Independent human judge evaluation metadata with optional AI evidence summary. Individual criterion scores live in the /criteria/{criterionId} subcollection.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "submissionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "judgeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "judgeName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "criteriaScores": { "type": "array", "description": "Empty array in v2_subcollection writes; legacy v1_inline evaluations may contain historical inline criteria on read." },
+        "weightedTotal": { "type": "number", "description": "Client-computed weighted total display cache; readers always recompute from /criteria subcollection docs." },
+        "scoredCriterionCount": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "storageSchema": { "type": "string", "enum": ["v1_inline", "v2_subcollection"] },
+        "conflictOfInterest": { "type": "boolean" },
+        "conflictReason": { "type": "string", "maxLength": 500 },
+        "humanFeedback": { "type": "string", "maxLength": 4000 },
+        "aiReportSummary": { "type": "string", "maxLength": 6000 },
+        "aiInferenceSource": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["draft", "finalizing", "submitted"] },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "submissionId", "judgeId", "criteriaScores", "weightedTotal", "conflictOfInterest", "status", "createdAt", "updatedAt"]
+    },
+    "EvaluationCriterionScore": {
+      "title": "EvaluationCriterionScore",
+      "description": "Normalized individual rubric criterion score stored at /evaluations/{evaluationId}/criteria/{criterionId}.",
+      "type": "object",
+      "properties": {
+        "criterionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "evaluationId": { "type": "string", "minLength": 1, "maxLength": 257, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "submissionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "judgeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "criterionName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "weight": { "type": "number", "minimum": 0, "maximum": 100 },
+        "score": { "type": "number", "minimum": 0, "maximum": 10 },
+        "comment": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["criterionId", "evaluationId", "hackathonId", "submissionId", "judgeId", "criterionName", "weight", "score", "updatedAt"]
+    },
+    "HackathonResults": {
+      "title": "HackathonResults",
+      "description": "Aggregated fair-judging rankings for a hackathon.",
+      "type": "object",
+      "properties": {
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "published": { "type": "boolean" },
+        "rankings": { "type": "array" },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hackathonId", "organizerId", "published", "rankings", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app user notification backed by Firestore.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["registration", "team_invitation", "team_accepted", "deadline", "submission", "judge_assignment", "evaluation", "results"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "link": { "type": "string", "maxLength": 200 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "type", "title", "message", "read", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only audit trail for organizer, judging, and administrative actions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "action": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "targetCollection": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "targetId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "hackathonId": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actorId", "action", "targetCollection", "targetId", "createdAt"]
+    },
+    "AIUsage": {
+      "title": "AIUsage",
+      "description": "Hybrid AI inference telemetry record without raw sensitive prompts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "taskName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "inferenceSource": { "type": "string", "enum": ["ON-DEVICE", "CLOUD", "LOCAL MODEL UNAVAILABLE", "FALLBACK TO CLOUD", "FAILED"] },
+        "requestedMode": { "type": "string", "enum": ["prefer_on_device", "prefer_in_cloud", "only_on_device", "only_in_cloud"] },
+        "modelId": { "type": "string", "maxLength": 120 },
+        "durationMs": { "type": "number" },
+        "fallbackOccurred": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["success", "failed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "taskName", "inferenceSource", "requestedMode", "durationMs", "fallbackOccurred", "status", "createdAt"]
+    },
+    "Sponsor": {
+      "title": "Sponsor",
+      "description": "Authorized sponsor record linked to a hackathon.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hackathonId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sponsorUserId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizationName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "tier": { "type": "string", "enum": ["platinum", "gold", "silver", "community"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "websiteUrl": { "type": "string", "maxLength": 300 },
+        "notes": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hackathonId", "organizerId", "sponsorUserId", "organizationName", "tier", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Server-managed administrator role records."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public builder, organizer, judge, and sponsor profiles (no PII)."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Owner-only PII and AI cloud consent preferences."
+    },
+    "/hackathons/{hackathonId}": {
+      "schema": { "$ref": "#/entities/Hackathon" },
+      "description": "Hackathon events, rubrics, tracks, and publication state."
+    },
+    "/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/HackathonRegistration" },
+      "description": "Participant registrations scoped to hackathons."
+    },
+    "/teams/{teamId}": {
+      "schema": { "$ref": "#/entities/Team" },
+      "description": "Hackathon builder teams."
+    },
+    "/teams/{teamId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMember" },
+      "description": "Authoritative team membership subcollection."
+    },
+    "/teams/{teamId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/TeamJoinCodeSecret" },
+      "description": "Leader-only double-hash verifier metadata and active status document."
+    },
+    "/teams/{teamId}/joinClaims/{claimUid}": {
+      "schema": { "$ref": "#/entities/TeamJoinClaim" },
+      "description": "Write-only atomic claim presenting SHA256(token) proof or invitation, purged post-commit."
+    },
+    "/teamJoinCodes/{verifierHash}": {
+      "schema": { "$ref": "#/entities/TeamJoinCodeIndex" },
+      "description": "Double-hash (SHA256(SHA256(token))) lookup index for team join codes."
+    },
+    "/teamInvitations/{invitationId}": {
+      "schema": { "$ref": "#/entities/TeamInvitation" },
+      "description": "Team invitations between participants."
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Team project workspaces and AI mentor summaries."
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/ProjectSubmission" },
+      "description": "Formal hackathon project submissions."
+    },
+    "/judgeAssignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/JudgeAssignment" },
+      "description": "Judge invitations and assigned submission lists."
+    },
+    "/evaluations/{evaluationId}": {
+      "schema": { "$ref": "#/entities/Evaluation" },
+      "description": "Independent judge evaluation parent metadata, AI evidence summary, and draft/finalizing/submitted state."
+    },
+    "/evaluations/{evaluationId}/criteria/{criterionId}": {
+      "schema": { "$ref": "#/entities/EvaluationCriterionScore" },
+      "description": "Normalized O(1)-rule-validated individual rubric criterion score document."
+    },
+    "/hackathonResults/{hackathonId}": {
+      "schema": { "$ref": "#/entities/HackathonResults" },
+      "description": "Fair-judging aggregated final rankings."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "User-scoped in-app notifications."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable audit trail."
+    },
+    "/aiUsage/{usageId}": {
+      "schema": { "$ref": "#/entities/AIUsage" },
+      "description": "Hybrid AI inference telemetry logs."
+    },
+    "/sponsors/{sponsorId}": {
+      "schema": { "$ref": "#/entities/Sponsor" },
+      "description": "Sponsor partnerships linked to hackathons."
+    }
+  }
+}

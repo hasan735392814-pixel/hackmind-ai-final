@@ -1,0 +1,12 @@
+{
+  "projectId": "hackmind-ai",
+  "appId": "1:695233244494:web:84d52ce65db1fba47fc21f",
+  "apiKey": "AIzaSyCsrwIX1dRWeQV6M-kp2qZERwnJBXwXU3k",
+  "authDomain": "hackmind-ai.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-7c931fff-d8ab-4b91-838f-863f0a80ceb2",
+  "storageBucket": "hackmind-ai.firebasestorage.app",
+  "messagingSenderId": "695233244494",
+  "measurementId": "",
+  "oAuthClientId": "695233244494-k9idlv59roo86gbrrvff3rshs92t3nso.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

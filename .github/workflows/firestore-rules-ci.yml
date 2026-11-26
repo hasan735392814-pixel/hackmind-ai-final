@@ -1,0 +1,45 @@
+name: Firestore Security Rules & Test Suite CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify-security-rules:
+    name: Rules Lint, Typecheck, Unit Tests & Firestore Emulator Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up Java 21 (Temurin) for Firebase Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint Firestore Security Rules
+        run: npx eslint firestore.rules
+
+      - name: TypeScript typecheck
+        run: npm run lint
+
+      - name: Run unit, integration, and rules-spec tests
+        run: npm test
+
+      - name: Run Firestore Emulator security & concurrency test suite
+        run: npx firebase emulators:exec --project demo-hackmind-test --only firestore "npx vitest run tests/security/firestoreRules.emulator.test.ts"
+
+      - name: Verify production build
+        run: npm run build

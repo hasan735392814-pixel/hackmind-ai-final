@@ -1,0 +1,6 @@
+{
+  "name": "HACKMIND AI",
+  "description": "From Hackathon Ideas to Winning Innovations — Bilingual Hybrid AI Platform for Hackathon Creation, Participation, Mentoring, and Fair Judging powered by Firebase AI Logic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
