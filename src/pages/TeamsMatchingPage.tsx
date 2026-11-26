@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { InferenceMode } from 'firebase/ai';
 import { Sparkles, UserPlus, XCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -20,7 +20,7 @@ import {
   computeFairTeammateMatches,
   type TeammateMatchRecommendation
 } from '../services/matching/teamMatching';
-import type { Hackathon, Team, TeamInvitation } from '../types/domain';
+import type { Hackathon, Team, TeamInvitation, UserProfile } from '../types/domain';
 import { InferenceResultBanner } from '../components/common/InferenceBadge';
 import { InferenceModeSelector } from '../components/common/InferenceModeSelector';
 import { formatActionableError } from '../utils/registrationResolution';
@@ -39,7 +39,7 @@ export function TeamsMatchingPage() {
   const [hackathons, setHackathons] = useState<Hackathon[]>([]);
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState('');
-  const [matches, setMatches] = useState<TeammateMatchRecommendation[]>([]);
+  const [candidates, setCandidates] = useState<UserProfile[]>([]);
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [aiMode, setAiMode] = useState<InferenceMode>(InferenceMode.PREFER_ON_DEVICE);
@@ -49,7 +49,7 @@ export function TeamsMatchingPage() {
   const [feedback, setFeedback] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!user || !profile) return;
     const [hacksRes, tmsRes, candidatesRes, invsRes] = await Promise.allSettled([
       listPublishedHackathons(),
@@ -61,7 +61,7 @@ export function TeamsMatchingPage() {
     const errors: string[] = [];
     const hacks = hacksRes.status === 'fulfilled' ? hacksRes.value : (errors.push(formatActionableError(hacksRes.reason, 'Failed to load hackathons')), []);
     const tms = tmsRes.status === 'fulfilled' ? tmsRes.value : (errors.push(formatActionableError(tmsRes.reason, 'Failed to load teams')), []);
-    const candidates = candidatesRes.status === 'fulfilled' ? candidatesRes.value : (errors.push(formatActionableError(candidatesRes.reason, 'Failed to load teammates')), []);
+    const fetchedCandidates = candidatesRes.status === 'fulfilled' ? candidatesRes.value : (errors.push(formatActionableError(candidatesRes.reason, 'Failed to load teammates')), []);
     const invs = invsRes.status === 'fulfilled' ? invsRes.value : (errors.push(formatActionableError(invsRes.reason, 'Failed to load invitations')), []);
 
     if (errors.length > 0) {
@@ -70,17 +70,20 @@ export function TeamsMatchingPage() {
 
     setHackathons(hacks);
     setMyTeams(tms);
-    const activeTeam = tms.find((x) => x.id === selectedTeamId) || tms[0] || null;
-    if (activeTeam && !selectedTeamId) setSelectedTeamId(activeTeam.id);
-    setMatches(computeFairTeammateMatches(profile, candidates, activeTeam));
+    setCandidates(fetchedCandidates);
+    setSelectedTeamId((prev) => (prev && tms.some((x) => x.id === prev) ? prev : tms[0]?.id || ''));
     setInvitations(invs);
-  };
+  }, [user, profile]);
 
   useEffect(() => {
     void loadData();
-  }, [user, profile, selectedTeamId, emailVerified]);
+  }, [loadData, emailVerified]);
 
   const selectedTeam = myTeams.find((tm) => tm.id === selectedTeamId) || myTeams[0] || null;
+  const matches = useMemo(
+    () => (profile ? computeFairTeammateMatches(profile, candidates, selectedTeam) : []),
+    [profile, candidates, selectedTeam]
+  );
   const selectedTeamHackathon = selectedTeam
     ? hackathons.find((h) => h.id === selectedTeam.hackathonId)
     : undefined;

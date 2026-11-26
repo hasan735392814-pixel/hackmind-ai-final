@@ -7,6 +7,7 @@ import {
   type Firestore
 } from 'firebase/firestore';
 import {
+  getToken,
   initializeAppCheck,
   ReCaptchaEnterpriseProvider,
   type AppCheck
@@ -429,7 +430,6 @@ export async function verifyAppCheckToken(options?: {
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    const { getToken } = await import('firebase/app-check');
     const tokenPromise = getToken(state.instance, Boolean(options?.forceRefresh));
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {

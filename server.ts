@@ -33,8 +33,18 @@ async function startServer(): Promise<void> {
       return;
     }
 
-    const result = await probePublicDemoFromServer(rawUrl);
-    res.status(result.ssrfBlocked ? 403 : 200).json(result);
+    try {
+      const result = await probePublicDemoFromServer(rawUrl);
+      res.status(result.ssrfBlocked ? 403 : 200).json(result);
+    } catch {
+      res.status(500).json({
+        ok: false,
+        status: 'BLOCKED',
+        blockedReason: 'Unexpected error while probing public demo URL.',
+        manualVerificationRequired: true,
+        probeMethod: 'server_http_probe'
+      });
+    }
   });
 
   if (!IS_PRODUCTION) {

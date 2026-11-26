@@ -195,7 +195,7 @@ export function RegistrationDiagnosticPanel({
           </p>
         ) : queryResult && queryResult.records.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-[11px]">
+            <table className="w-full text-start border-collapse text-[11px]">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
                   <th className="py-1.5 pe-3">Exact Doc ID</th>
@@ -273,7 +273,7 @@ export function RegistrationDiagnosticPanel({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 font-mono">
               <div className="flex justify-between gap-2 border-b border-slate-100 dark:border-slate-800/60 py-1">
                 <span className="text-slate-500 font-sans">Expected composite ID:</span>
-                <span className="break-all text-right">
+                <span className="break-all text-end">
                   {compositeResult.expectedCompositeId || '(none)'}
                 </span>
               </div>
@@ -412,13 +412,13 @@ export function RegistrationDiagnosticPanel({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 font-mono">
               <div className="flex justify-between gap-2 border-b border-slate-100 dark:border-slate-800/60 py-1">
                 <span className="text-slate-500 font-sans">Hackathon organizerId:</span>
-                <span className="break-all text-right">
+                <span className="break-all text-end">
                   {selectedHackathon?.organizerId || '(missing)'}
                 </span>
               </div>
               <div className="flex justify-between gap-2 border-b border-slate-100 dark:border-slate-800/60 py-1">
                 <span className="text-slate-500 font-sans">Rule registration path:</span>
-                <span className="break-all text-right">
+                <span className="break-all text-end">
                   {compositeResult.documentPath || '(none)'}
                 </span>
               </div>
