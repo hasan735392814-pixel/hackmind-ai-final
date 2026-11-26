@@ -30,7 +30,7 @@ jobs:
           java-version: '21'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Lint Firestore Security Rules
         run: npx eslint firestore.rules
