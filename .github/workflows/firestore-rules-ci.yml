@@ -42,7 +42,7 @@ jobs:
         run: npm test
 
       - name: Run Firestore Emulator security & concurrency test suite
-        run: npx firebase emulators:exec --project demo-hackmind-test --only firestore "npx vitest run tests/security/firestoreRules.emulator.test.ts"
+        run: ./node_modules/.bin/firebase emulators:exec --project demo-hackmind-test --only firestore "npx vitest run tests/security/firestoreRules.emulator.test.ts"
 
       - name: Verify production build
         run: npm run build
