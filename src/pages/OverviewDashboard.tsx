@@ -179,58 +179,68 @@ export function OverviewDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-            {locale === 'ar'
-              ? `مرحباً، ${profile?.displayName || user?.displayName || 'مبتكر'}`
-              : `Welcome, ${profile?.displayName || user?.displayName || 'Builder'}`}
-          </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            {locale === 'ar'
-              ? 'ملخص فوري لأنشطتك الموثقة في Firestore ومسارات الذكاء الهجين.'
-              : 'Live summary of your persisted Firestore activity and Hybrid AI executions.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to="/app/discover"
-            className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700"
-          >
-            {locale === 'ar' ? 'استكشاف الهاكاثونات' : 'Discover Hackathons'}
-          </Link>
-          {effectiveRole === 'judge' && (
+      {/* Branded Dashboard Header Banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-blue-500/20 dark:border-blue-500/25 bg-gradient-to-r from-blue-950/20 via-[#0B1120] to-purple-950/20 p-5 sm:p-6 shadow-sm">
+        <div className="pointer-events-none absolute -top-12 -right-12 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl" />
+        <div className="pointer-events-none absolute -bottom-12 -left-12 w-48 h-48 bg-purple-500/10 rounded-full blur-2xl" />
+
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-blue-600 dark:text-blue-400 mb-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+              <span>{locale === 'ar' ? 'ابتكر · تعاون · ابنِ بذكاء' : 'Innovate · Collaborate · Build Smarter'}</span>
+            </div>
+            <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+              {locale === 'ar'
+                ? `مرحباً، ${profile?.displayName || user?.displayName || 'مبتكر'}`
+                : `Welcome, ${profile?.displayName || user?.displayName || 'Builder'}`}
+            </h1>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              {locale === 'ar'
+                ? 'ملخص فوري لأنشطتك الموثقة في Firestore ومسارات الذكاء الهجين.'
+                : 'Live summary of your persisted Firestore activity and Hybrid AI executions.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Link
-              to="/app/judging-v2"
-              className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              to="/app/discover"
+              className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-md shadow-blue-500/20 hover:from-blue-500 hover:to-indigo-500 transition-all"
             >
-              {locale === 'ar' ? 'مساحة التحكيم' : 'Judging Workspace'}
+              {locale === 'ar' ? 'استكشاف الهاكاثونات' : 'Discover Hackathons'}
             </Link>
-          )}
-          {effectiveRole === 'sponsor' && (
-            <Link
-              to="/app/sponsors"
-              className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              {locale === 'ar' ? 'تحليلات الرعاة' : 'Sponsor Analytics'}
-            </Link>
-          )}
-          {(effectiveRole === 'organizer' || effectiveRole === 'admin') && (
-            <Link
-              to="/app/organizer"
-              className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              {locale === 'ar' ? 'استوديو المنظمين' : 'Organizer Studio'}
-            </Link>
-          )}
-          {effectiveRole === 'participant' && (
-            <Link
-              to="/app/builder"
-              className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              {locale === 'ar' ? 'مساحة المشاركين' : 'Builder Workspace'}
-            </Link>
-          )}
+            {effectiveRole === 'judge' && (
+              <Link
+                to="/app/judging-v2"
+                className="rounded-xl border border-slate-300 dark:border-slate-700/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                {locale === 'ar' ? 'مساحة التحكيم' : 'Judging Workspace'}
+              </Link>
+            )}
+            {effectiveRole === 'sponsor' && (
+              <Link
+                to="/app/sponsors"
+                className="rounded-xl border border-slate-300 dark:border-slate-700/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                {locale === 'ar' ? 'تحليلات الرعاة' : 'Sponsor Analytics'}
+              </Link>
+            )}
+            {(effectiveRole === 'organizer' || effectiveRole === 'admin') && (
+              <Link
+                to="/app/organizer"
+                className="rounded-xl border border-slate-300 dark:border-slate-700/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                {locale === 'ar' ? 'استوديو المنظمين' : 'Organizer Studio'}
+              </Link>
+            )}
+            {effectiveRole === 'participant' && (
+              <Link
+                to="/app/builder"
+                className="rounded-xl border border-slate-300 dark:border-slate-700/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                {locale === 'ar' ? 'مساحة المشاركين' : 'Builder Workspace'}
+              </Link>
+            )}
+          </div>
         </div>
       </div>
 

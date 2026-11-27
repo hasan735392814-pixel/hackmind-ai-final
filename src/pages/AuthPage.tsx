@@ -113,32 +113,41 @@ export function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#070B14] flex flex-col justify-between p-4 sm:p-6">
-      <div className="mx-auto max-w-6xl w-full flex items-center justify-between">
+    <div className="relative min-h-screen bg-slate-50 dark:bg-[#070B14] flex flex-col justify-between p-4 sm:p-6 overflow-hidden">
+      {/* Ambient Atmospheric Neon Glow */}
+      <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[600px] h-72 bg-gradient-to-b from-blue-600/15 via-purple-600/10 to-transparent blur-3xl opacity-70 dark:opacity-90" />
+
+      <div className="mx-auto max-w-6xl w-full flex items-center justify-between relative z-10">
         <Link to="/">
           <BrandLogo />
         </Link>
         <button
           type="button"
           onClick={toggleLocale}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 backdrop-blur px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:border-blue-500/40"
         >
           <Globe className="h-3.5 w-3.5" />
           <span>{locale === 'en' ? 'العربية' : 'English'}</span>
         </button>
       </div>
 
-      <div className="mx-auto max-w-md w-full my-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] p-6 sm:p-8 space-y-6">
-        <div className="space-y-1">
-          <h1 className="font-display text-xl font-bold text-slate-900 dark:text-white">
-            {mode === 'signin'
-              ? t.auth.titleSignIn
-              : mode === 'signup'
-                ? t.auth.titleSignUp
-                : t.auth.titleReset}
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{t.tagline}</p>
-        </div>
+      <div className="relative z-10 mx-auto max-w-md w-full my-8 rounded-2xl border border-slate-200 dark:border-blue-500/20 bg-white dark:bg-[#0B1120] shadow-[0_0_40px_-15px_rgba(59,130,246,0.25)] overflow-hidden">
+        {/* Top Neon Accent Rim */}
+        <div className="h-1 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
+
+        <div className="p-6 sm:p-8 space-y-6">
+          <div className="space-y-1">
+            <h1 className="font-display text-xl font-bold text-slate-900 dark:text-white">
+              {mode === 'signin'
+                ? t.auth.titleSignIn
+                : mode === 'signup'
+                  ? t.auth.titleSignUp
+                  : t.auth.titleReset}
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {locale === 'ar' ? 'ابتكر · تعاون · ابنِ بذكاء' : 'Innovate · Collaborate · Build Smarter'}
+            </p>
+          </div>
 
         {!configStatus.configured && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
@@ -248,7 +257,7 @@ export function AuthPage() {
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            className="w-full rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-500/25 hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 transition-all"
           >
             {busy
               ? t.common.loading
@@ -305,6 +314,7 @@ export function AuthPage() {
           <span>{t.auth.emailProviderHint}</span>
         </div>
       </div>
+    </div>
 
       <div className="text-center text-xs text-slate-500">
         {locale === 'ar'

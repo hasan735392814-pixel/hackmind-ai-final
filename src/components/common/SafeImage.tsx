@@ -4,6 +4,7 @@ import { ImageOff } from 'lucide-react';
 interface SafeImageProps {
   src: string;
   alt: string;
+  webpSrc?: string;
   className?: string;
   fallbackTitle?: string;
   fallbackSubtitle?: string;
@@ -15,6 +16,7 @@ interface SafeImageProps {
 export function SafeImage({
   src,
   alt,
+  webpSrc,
   className = 'h-full w-full object-cover',
   fallbackTitle,
   fallbackSubtitle,
@@ -39,6 +41,22 @@ export function SafeImage({
           <div className="max-w-xs text-xs text-slate-400">{fallbackSubtitle}</div>
         )}
       </div>
+    );
+  }
+
+  if (webpSrc) {
+    return (
+      <picture className="contents">
+        <source srcSet={webpSrc} type="image/webp" />
+        <img
+          src={src}
+          alt={alt}
+          referrerPolicy={referrerPolicy}
+          loading={loading}
+          onError={() => setFailed(true)}
+          className={className}
+        />
+      </picture>
     );
   }
 

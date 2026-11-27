@@ -477,7 +477,7 @@ export function DiscoveryPage() {
             return (
               <div
                 key={h.id}
-                className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] p-6 flex flex-col justify-between space-y-4"
+                className="rounded-2xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0B1120] p-6 flex flex-col justify-between space-y-4 transition-all hover:border-blue-500/40 dark:hover:border-blue-400/30 hover:shadow-lg hover:shadow-blue-500/5"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -535,7 +535,7 @@ export function DiscoveryPage() {
                       setFeedback('');
                       setErrorMsg('');
                     }}
-                    className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 whitespace-nowrap"
+                    className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-blue-500 hover:to-indigo-500 whitespace-nowrap transition-all"
                   >
                     {locale === 'ar' ? 'عرض التفاصيل' : 'Details'}
                   </button>

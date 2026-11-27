@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Cpu, Cloud, ArrowRight, ArrowLeft } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Cpu,
+  Cloud,
+  ArrowRight,
+  ArrowLeft,
+  Rocket,
+  Users,
+  Code2,
+  Trophy,
+  Maximize2,
+  X
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { listPublishedHackathons } from '../services/firebase/firestoreService';
@@ -13,6 +26,9 @@ import heroWorkspaceImg from '../assets/images/hero_hackmind_workspace_179476958
 import edgeAiWorkstationImg from '../assets/images/hackathon_edge_ai_1794769584219.jpg';
 import judgingReviewImg from '../assets/images/hackathon_judging_review_1794769585505.jpg';
 
+const OFFICIAL_HERO_COVER_PNG = '/assets/branding/hackmind_official_cover.png';
+const OFFICIAL_HERO_COVER_WEBP = '/assets/branding/hackmind_official_cover.webp';
+
 export function LandingPage() {
   const { user } = useAuth();
   const { locale, dir, t, toggleLocale } = useLanguage();
@@ -22,6 +38,7 @@ export function LandingPage() {
   const [capability, setCapability] = useState<DeviceCapabilityReport | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [legalModal, setLegalModal] = useState<'docs' | 'privacy' | 'terms' | 'contact' | null>(null);
+  const [previewArtworkModal, setPreviewArtworkModal] = useState(false);
 
   const ArrowIcon = dir === 'rtl' ? ArrowLeft : ArrowRight;
 
@@ -179,33 +196,42 @@ export function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 pt-12 pb-16 lg:pt-20 lg:pb-24">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-stretch">
+      <section className="relative mx-auto max-w-7xl px-4 sm:px-6 pt-10 pb-16 lg:pt-16 lg:pb-20">
+        {/* Ambient Atmospheric Neon Glows (Dark Navy / Electric Blue / Purple) */}
+        <div className="pointer-events-none absolute -top-16 inset-x-0 h-96 overflow-hidden -z-10">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[360px] bg-gradient-to-b from-blue-600/15 via-purple-600/10 to-transparent blur-3xl opacity-70 dark:opacity-90" />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+          {/* Left Column: Value Proposition & CTAs */}
           <div className="lg:col-span-6 flex flex-col justify-center space-y-6">
-            <p className="text-xs font-medium tracking-wide text-blue-600 dark:text-blue-400">
-              {t.tagline}
-            </p>
+            <div className="inline-flex items-center gap-2 self-start rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+              <span>{locale === 'ar' ? 'منصة هاكاثونات ذكية مدعومة بالذكاء الاصطناعي' : 'An Intelligent Hackathon Platform Powered by AI'}</span>
+            </div>
+
             <h1
-              className="font-display font-bold tracking-tight text-slate-900 dark:text-white leading-[1.12]"
-              style={{ fontSize: 'clamp(2.25rem, 4vw, 3.5rem)', textWrap: 'balance' }}
+              className="font-display font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.12]"
+              style={{ fontSize: 'clamp(2.25rem, 4.2vw, 3.6rem)', textWrap: 'balance' }}
             >
               {t.landing.heroTitle}
             </h1>
-            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-300 max-w-xl">
+
+            <p className="text-base sm:text-lg leading-relaxed text-slate-600 dark:text-slate-300 max-w-xl">
               {t.landing.heroSubtitle}
             </p>
 
-            <div className="flex flex-wrap items-center gap-4 pt-2">
+            <div className="flex flex-wrap items-center gap-4 pt-1">
               <Link
                 to={user ? '/app' : '/auth'}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/25 hover:from-blue-500 hover:to-indigo-500 transition-all whitespace-nowrap"
               >
                 <span>{t.landing.heroPrimaryCta}</span>
                 <ArrowIcon className="h-4 w-4" />
               </Link>
               <a
                 href="#discover"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 px-6 py-3 text-sm font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700/80 bg-white/50 dark:bg-slate-900/40 backdrop-blur px-6 py-3.5 text-sm font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors whitespace-nowrap"
               >
                 {t.landing.heroSecondaryCta}
               </a>
@@ -217,20 +243,131 @@ export function LandingPage() {
                 {locale === 'en' ? 'التبديل إلى العربية' : 'Switch to English'}
               </button>
             </div>
+
+            {/* Platform Powered-By Indicators */}
+            <div className="pt-2 flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <Cpu className="h-3.5 w-3.5 text-blue-500" />
+                <span>Gemini Nano On-Device</span>
+              </span>
+              <span aria-hidden="true" className="text-slate-400">·</span>
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <Cloud className="h-3.5 w-3.5 text-purple-500" />
+                <span>Firebase Cloud AI & Auth</span>
+              </span>
+              <span aria-hidden="true" className="text-slate-400">·</span>
+              <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                {locale === 'ar' ? 'تحكيم موثق V2' : 'Verifiable Judging V2'}
+              </span>
+            </div>
           </div>
 
-          <div className="lg:col-span-6 flex">
-            <div className="relative w-full overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-900 min-h-[280px]">
-              <SafeImage
-                src={heroWorkspaceImg}
-                alt={locale === 'ar' ? 'مهندسون يتعاونون في مساحة عمل الهاكاثون' : 'Engineers collaborating at a hackathon workspace'}
-                fallbackTitle={locale === 'ar' ? 'مساحة عمل الهاكاثون' : 'Hackathon Engineering Workspace'}
-                fallbackSubtitle="Firebase AI Logic · Firestore Zero-Trust"
-                className="h-full w-full object-cover"
-              />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#070B14]/80 via-transparent to-transparent" />
-              <div className="absolute bottom-4 inset-x-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-200">
-                <span>Firebase AI Logic · Firestore Zero-Trust · English & العربية</span>
+          {/* Right Column: Official HACKMIND AI Branding Hero Visual */}
+          <div className="lg:col-span-6 flex justify-center">
+            <div className="relative w-full max-w-2xl rounded-2xl border border-blue-500/30 dark:border-blue-400/25 bg-[#060A14] p-1.5 shadow-[0_0_50px_-15px_rgba(59,130,246,0.35)] dark:shadow-[0_0_60px_-15px_rgba(139,92,246,0.25)] group transition-all duration-300">
+              <div className="relative w-full overflow-hidden rounded-xl aspect-[3/2] bg-[#070B14]">
+                <SafeImage
+                  src={OFFICIAL_HERO_COVER_PNG}
+                  webpSrc={OFFICIAL_HERO_COVER_WEBP}
+                  alt={
+                    locale === 'ar'
+                      ? 'الغلاف الرسمي لمنصة HACKMIND AI: منصة هاكاثونات ذكية مدعومة بالذكاء الاصطناعي مع تقنيات Gemini Nano وFirebase وشعار الدماغ والـ H وأدوات إدارة الهاكاثون والتعاون والتحكيم الذكي'
+                      : 'Official HACKMIND AI branding artwork: An Intelligent Hackathon Platform powered by Gemini Nano and Firebase, featuring the glowing brain emblem, hackathon management, team collaboration, and smart evaluation.'
+                  }
+                  fallbackTitle={locale === 'ar' ? 'الهوية البصرية الرسمية لمنصة HACKMIND AI' : 'Official HACKMIND AI Platform Visual'}
+                  fallbackSubtitle="Gemini Nano · Firebase · Fair Judging V2"
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.01]"
+                  loading="eager"
+                />
+
+                {/* Subtle Bottom Ambient Gradient Scrim */}
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#060A14]/90 via-transparent to-transparent" />
+
+                {/* Floating Caption & Fullscreen Trigger */}
+                <div className="absolute bottom-3 inset-x-3 sm:bottom-4 sm:inset-x-4 flex items-center justify-between gap-2 rounded-xl bg-slate-950/80 backdrop-blur-md border border-white/10 px-3.5 py-2 text-xs text-slate-200">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="h-2 w-2 rounded-full bg-blue-400 shrink-0 shadow-[0_0_6px_#38bdf8]" />
+                    <span className="font-semibold text-white truncate">
+                      {locale === 'ar' ? 'الهوية البصرية الرسمية · HACKMIND AI' : 'Official Brand Visual · HACKMIND AI'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewArtworkModal(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600/40 hover:bg-blue-600/70 border border-blue-400/30 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors shrink-0"
+                    aria-label={locale === 'ar' ? 'تكبير الغلاف الرسمي' : 'View full-size cover artwork'}
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                    <span>{locale === 'ar' ? 'تكبير' : 'View'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 4 Core Pillars Strip (Echoing Official Cover Badges: Management, Collaboration, AI Dev, Smart Evaluation) */}
+        <div className="mt-14 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white/70 dark:bg-[#0B1120]/70 backdrop-blur p-4 transition-all hover:border-blue-500/40 dark:hover:border-blue-400/40 group">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
+                <Rocket className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  {locale === 'ar' ? 'إدارة الهاكاثونات' : 'Hackathon Management'}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {locale === 'ar' ? 'مسارات ذكية ومعايير وجداول مخصصة' : 'Tracks, timelines & weighted rubrics'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white/70 dark:bg-[#0B1120]/70 backdrop-blur p-4 transition-all hover:border-indigo-500/40 dark:hover:border-indigo-400/40 group">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition-transform">
+                <Users className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  {locale === 'ar' ? 'التعاون وبناء الفرق' : 'Team Collaboration'}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {locale === 'ar' ? 'مطابقة قائمة على المهارات والأدوار' : 'Skill matching & role complementarity'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white/70 dark:bg-[#0B1120]/70 backdrop-blur p-4 transition-all hover:border-purple-500/40 dark:hover:border-purple-400/40 group">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 group-hover:scale-105 transition-transform">
+                <Code2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  {locale === 'ar' ? 'التطوير بالذكاء الاصطناعي' : 'AI-Powered Development'}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {locale === 'ar' ? 'مرشد هجين على الجهاز وعبر السحابة' : 'Hybrid AI Mentor & on-device Prompt API'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white/70 dark:bg-[#0B1120]/70 backdrop-blur p-4 transition-all hover:border-amber-500/40 dark:hover:border-amber-400/40 group">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 group-hover:scale-105 transition-transform">
+                <Trophy className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  {locale === 'ar' ? 'التحكيم الذكي الموزون' : 'Smart Evaluation'}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {locale === 'ar' ? 'فصل الأدلة عن الادعاءات وسلطة بشرية' : 'Evidence audit & human authority'}
+                </p>
               </div>
             </div>
           </div>
@@ -394,7 +531,7 @@ export function LandingPage() {
               {hackathons.map((h) => (
                 <div
                   key={h.id}
-                  className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#070B14] p-6 flex flex-col justify-between space-y-4"
+                  className="rounded-2xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-[#070B14] p-6 flex flex-col justify-between space-y-4 transition-all hover:border-blue-500/40 dark:hover:border-blue-400/30 hover:shadow-lg hover:shadow-blue-500/5"
                 >
                   <div>
                     <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -551,6 +688,59 @@ export function LandingPage() {
               >
                 {t.common.close}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewArtworkModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={locale === 'ar' ? 'معاينة الغلاف الرسمي لمنصة HACKMIND AI' : 'Official HACKMIND AI Cover Artwork Preview'}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-sm p-4 sm:p-6"
+          onClick={() => setPreviewArtworkModal(false)}
+        >
+          <div
+            className="relative max-w-4xl w-full rounded-2xl border border-blue-500/30 bg-[#060A14] p-3 sm:p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 px-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <BrandLogo iconSize={24} />
+                <span className="text-xs text-slate-400">
+                  {locale === 'ar' ? 'الهوية البصرية الرسمية' : 'Official Visual Identity'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewArtworkModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                aria-label={t.common.close}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="relative mt-3 w-full aspect-[3/2] overflow-hidden rounded-xl bg-slate-950">
+              <SafeImage
+                src={OFFICIAL_HERO_COVER_PNG}
+                webpSrc={OFFICIAL_HERO_COVER_WEBP}
+                alt={
+                  locale === 'ar'
+                    ? 'الغلاف الرسمي لمنصة HACKMIND AI: منصة هاكاثونات ذكية مدعومة بالذكاء الاصطناعي مع تقنيات Gemini Nano وFirebase وشعار الدماغ والـ H وأدوات إدارة الهاكاثون والتعاون والتحكيم الذكي'
+                    : 'Official HACKMIND AI branding artwork: An Intelligent Hackathon Platform powered by Gemini Nano and Firebase, featuring the glowing brain emblem, hackathon management, team collaboration, and smart evaluation.'
+                }
+                fallbackTitle={locale === 'ar' ? 'الهوية البصرية الرسمية لمنصة HACKMIND AI' : 'Official HACKMIND AI Platform Visual'}
+                fallbackSubtitle="Gemini Nano · Firebase · Fair Judging V2"
+                className="h-full w-full object-contain"
+              />
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-2 text-xs text-slate-400">
+              <span>HACKMIND AI · Innovate · Collaborate · Build Smarter</span>
+              <span className="font-mono text-[11px] text-slate-500">1536 × 1024 · WebP / PNG</span>
+              <img src={heroWorkspaceImg} alt="" className="hidden" aria-hidden="true" />
             </div>
           </div>
         </div>
