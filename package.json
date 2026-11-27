@@ -42,6 +42,7 @@
     "eslint": "^10.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.8",
+    "firebase-tools": "^15.37.0",
     "globals": "^17.14.0",
     "jsdom": "^31.0.1",
     "tailwindcss": "^4.3.3",
