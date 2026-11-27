@@ -34,7 +34,11 @@ const mockFirestoreFns = vi.hoisted(() => ({
   getHackathonById: vi.fn(),
   listJudgeAssignedSubmissions: vi.fn(),
   listJudgeAssignmentsByJudge: vi.fn(),
-  listOrganizerSubmissions: vi.fn()
+  listJudgeEvaluations: vi.fn(),
+  listOrganizerEvaluations: vi.fn(),
+  listOrganizerSubmissions: vi.fn(),
+  saveEvaluation: vi.fn(),
+  updateJudgeAssignmentResponse: vi.fn()
 }));
 
 const mockExecuteHybridInference = vi.hoisted(() => vi.fn());
@@ -289,8 +293,12 @@ describe('Judging V2 UI — Locked ONLY_IN_CLOUD Mode & Explicit Live Authorizat
     mockAuthValue.privateInfo = { aiCloudConsent: true };
     mockFirestoreFns.listJudgeAssignedSubmissions.mockResolvedValue([submissionFixture]);
     mockFirestoreFns.listJudgeAssignmentsByJudge.mockResolvedValue([assignmentFixture]);
+    mockFirestoreFns.listJudgeEvaluations.mockResolvedValue([]);
+    mockFirestoreFns.listOrganizerEvaluations.mockResolvedValue([]);
     mockFirestoreFns.listOrganizerSubmissions.mockResolvedValue([]);
     mockFirestoreFns.getHackathonById.mockResolvedValue(hackathonFixture);
+    mockFirestoreFns.saveEvaluation.mockResolvedValue(undefined);
+    mockFirestoreFns.updateJudgeAssignmentResponse.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

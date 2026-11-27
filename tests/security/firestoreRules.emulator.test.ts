@@ -3468,7 +3468,7 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
           judgeId: 'j1',
           criterionName: 'Innovation',
           weight: 40,
-          score: 10.5,
+          score: 100.5,
           comment: '',
           updatedAt: serverTimestamp()
         })

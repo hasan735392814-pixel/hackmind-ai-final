@@ -1,4 +1,7 @@
+import type { RubricCriterion } from '../../types/domain';
+import { validateRubricWeights } from '../judging/fairJudgingEngine';
 import type {
+  ActiveCriterionDefinition,
   AIJudgingRecommendation,
   HumanCriterionEvaluation,
   OfficialCriterionDefinition,
@@ -88,7 +91,7 @@ export const OFFICIAL_CRITERIA_MAP: Record<OfficialCriterionId, OfficialCriterio
 
 export function roundScoreTwoDecimals(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.round(value * 100) / 100;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 export function getTotalOfficialWeightPercent(): number {
@@ -97,6 +100,65 @@ export function getTotalOfficialWeightPercent(): number {
 
 export function isOfficialCriterionId(id: string): id is OfficialCriterionId {
   return (OFFICIAL_CRITERION_IDS as readonly string[]).includes(id);
+}
+
+export function getDefaultActiveCriteria(): ActiveCriterionDefinition[] {
+  return OFFICIAL_JUDGING_CRITERIA.map((def) => ({
+    ...def,
+    isOfficial: true
+  }));
+}
+
+export function resolveActiveRubricCriteria(
+  hackathonRubric?: RubricCriterion[] | null
+): {
+  criteria: ActiveCriterionDefinition[];
+  isCustom: boolean;
+  validation: { valid: boolean; sum: number; error?: string };
+} {
+  if (!Array.isArray(hackathonRubric) || hackathonRubric.length === 0) {
+    return {
+      criteria: getDefaultActiveCriteria(),
+      isCustom: false,
+      validation: { valid: true, sum: 100 }
+    };
+  }
+
+  const validation = validateRubricWeights(hackathonRubric);
+  const criteria: ActiveCriterionDefinition[] = hackathonRubric.map((r) => {
+    const officialMatch = isOfficialCriterionId(r.id) ? OFFICIAL_CRITERIA_MAP[r.id] : null;
+    const weightPercent = Number(r.weight) || 0;
+    return {
+      id: r.id,
+      name: r.name || officialMatch?.name || r.id,
+      nameAr: officialMatch?.nameAr || r.name || r.id,
+      weight: weightPercent / 100,
+      weightPercent,
+      description: r.description || officialMatch?.description || '',
+      descriptionAr: officialMatch?.descriptionAr || r.description || '',
+      evidenceStandard:
+        officialMatch?.evidenceStandard ||
+        'Evaluate strictly against inspected source code, artifacts, and observable evidence.',
+      evidenceStandardAr:
+        officialMatch?.evidenceStandardAr ||
+        'التقييم بناءً على الشيفرة المصدرية والأدلة الموثقة فقط.',
+      isOfficial: Boolean(officialMatch)
+    };
+  });
+
+  const matchesExactOfficial =
+    criteria.length === OFFICIAL_JUDGING_CRITERIA.length &&
+    criteria.every(
+      (c, idx) =>
+        c.id === OFFICIAL_JUDGING_CRITERIA[idx].id &&
+        Math.abs(c.weightPercent - OFFICIAL_JUDGING_CRITERIA[idx].weightPercent) < 0.01
+    );
+
+  return {
+    criteria,
+    isCustom: !matchesExactOfficial,
+    validation
+  };
 }
 
 export interface FourCriteriaValidationResult {
@@ -158,6 +220,66 @@ export function validateFourCriteriaScores(
   return { valid: true };
 }
 
+export function validateCriteriaScoresForRubric(
+  criteria: Record<string, Pick<HumanCriterionEvaluation, 'criterionId' | 'score'>>,
+  activeCriteria: ActiveCriterionDefinition[],
+  options?: { requireAllScored?: boolean }
+): FourCriteriaValidationResult {
+  if (!Array.isArray(activeCriteria) || activeCriteria.length === 0) {
+    return { valid: false, error: 'Rubric must contain at least one criterion.' };
+  }
+  const totalWeight = activeCriteria.reduce((acc, c) => acc + Number(c.weightPercent || 0), 0);
+  if (totalWeight <= 0 || Math.abs(totalWeight - 100) >= 0.01) {
+    return {
+      valid: false,
+      error: `Rubric weights must sum to 100% (currently ${roundScoreTwoDecimals(totalWeight)}%).`
+    };
+  }
+
+  const allowedSet = new Set(activeCriteria.map((c) => c.id));
+  for (const key of Object.keys(criteria || {})) {
+    if (!allowedSet.has(key)) {
+      return {
+        valid: false,
+        error: `Unsupported judging criterion "${key}".`
+      };
+    }
+  }
+
+  for (const def of activeCriteria) {
+    const entry = criteria[def.id];
+    if (!entry || entry.criterionId !== def.id) {
+      return {
+        valid: false,
+        error: `Missing required criterion "${def.name}".`
+      };
+    }
+    if (entry.score === null || entry.score === undefined) {
+      if (options?.requireAllScored) {
+        return {
+          valid: false,
+          error: `Criterion "${def.name}" requires a numeric score from 0 to 100.`
+        };
+      }
+      continue;
+    }
+    if (typeof entry.score !== 'number' || !Number.isFinite(entry.score)) {
+      return {
+        valid: false,
+        error: `Invalid score for "${def.name}".`
+      };
+    }
+    if (entry.score < 0 || entry.score > 100) {
+      return {
+        valid: false,
+        error: `Score for "${def.name}" must be between 0 and 100.`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
 /**
  * Exact official formula:
  * Final Score = (Innovation * 0.25) + (Technical Implementation * 0.30) + (Real-World Impact * 0.25) + (User Experience & Completeness * 0.20)
@@ -178,8 +300,30 @@ export function calculateOfficialWeightedScore(
   return roundScoreTwoDecimals(total);
 }
 
+export function calculateWeightedScoreForRubric(
+  criteria: Record<string, Pick<HumanCriterionEvaluation, 'criterionId' | 'score'>>,
+  activeCriteria: ActiveCriterionDefinition[]
+): number | null {
+  const validation = validateCriteriaScoresForRubric(criteria, activeCriteria, {
+    requireAllScored: true
+  });
+  if (!validation.valid) {
+    return null;
+  }
+  const totalWeight = activeCriteria.reduce((acc, c) => acc + Number(c.weightPercent || 0), 0);
+  if (totalWeight <= 0) return null;
+
+  const weighted = activeCriteria.reduce((acc, def) => {
+    const score = Number(criteria[def.id]?.score ?? 0);
+    return acc + (score * def.weightPercent) / 100;
+  }, 0);
+
+  return roundScoreTwoDecimals((weighted / totalWeight) * 100);
+}
+
 export function calculateDraftWeightedPreview(
-  criteria: Record<OfficialCriterionId, Pick<HumanCriterionEvaluation, 'criterionId' | 'score'>>
+  criteria: Record<string, Pick<HumanCriterionEvaluation, 'criterionId' | 'score'>>,
+  activeCriteria: readonly ActiveCriterionDefinition[] = OFFICIAL_JUDGING_CRITERIA
 ): {
   scoredCount: number;
   weightedSoFar: number;
@@ -189,24 +333,24 @@ export function calculateDraftWeightedPreview(
   let scoredCount = 0;
   let weightedSoFar = 0;
 
-  for (const def of OFFICIAL_JUDGING_CRITERIA) {
+  for (const def of activeCriteria) {
     const score = criteria[def.id]?.score;
     if (typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100) {
       scoredCount += 1;
-      weightedSoFar += score * def.weight;
+      weightedSoFar += (score * def.weightPercent) / 100;
     }
   }
 
-  const finalWeightedScore =
-    scoredCount === OFFICIAL_JUDGING_CRITERIA.length
-      ? calculateOfficialWeightedScore(criteria)
-      : null;
+  const complete = activeCriteria.length > 0 && scoredCount === activeCriteria.length;
+  const finalWeightedScore = complete
+    ? calculateWeightedScoreForRubric(criteria, [...activeCriteria])
+    : null;
 
   return {
     scoredCount,
     weightedSoFar: roundScoreTwoDecimals(weightedSoFar),
     finalWeightedScore,
-    complete: scoredCount === OFFICIAL_JUDGING_CRITERIA.length
+    complete
   };
 }
 

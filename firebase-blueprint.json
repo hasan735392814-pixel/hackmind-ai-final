@@ -295,6 +295,7 @@
         "judgeName": { "type": "string", "minLength": 1, "maxLength": 100 },
         "criteriaScores": { "type": "array", "description": "Empty array in v2_subcollection writes; legacy v1_inline evaluations may contain historical inline criteria on read." },
         "weightedTotal": { "type": "number", "description": "Client-computed weighted total display cache; readers always recompute from /criteria subcollection docs." },
+        "scoreScale": { "type": "string", "enum": ["0_to_10", "0_to_100"] },
         "scoredCriterionCount": { "type": "integer", "minimum": 0, "maximum": 50 },
         "storageSchema": { "type": "string", "enum": ["v1_inline", "v2_subcollection"] },
         "conflictOfInterest": { "type": "boolean" },
@@ -321,7 +322,8 @@
         "judgeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "criterionName": { "type": "string", "minLength": 1, "maxLength": 120 },
         "weight": { "type": "number", "minimum": 0, "maximum": 100 },
-        "score": { "type": "number", "minimum": 0, "maximum": 10 },
+        "score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "scoreScale": { "type": "string", "enum": ["0_to_10", "0_to_100"] },
         "comment": { "type": "string", "maxLength": 1000 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

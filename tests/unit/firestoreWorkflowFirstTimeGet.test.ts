@@ -125,7 +125,8 @@ describe('First-Time Nonexistent Document Get -> Create/Update & Permission Erro
       criterionId: 'crit_1',
       criterionName: 'Innovation',
       weight: 100,
-      score: 8,
+      score: 80,
+      scoreScale: '0_to_100' as const,
       comment: 'Solid'
     };
     const baseEval = {
@@ -163,7 +164,7 @@ describe('First-Time Nonexistent Document Get -> Create/Update & Permission Erro
     );
     expect(mockSetDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'evaluations/sub_m3abc_9f8e7d_judge_1/criteria/crit_1' }),
-      expect.objectContaining({ criterionId: 'crit_1', score: 8, weight: 100 })
+      expect.objectContaining({ criterionId: 'crit_1', score: 80, scoreScale: '0_to_100', weight: 100 })
     );
     expect(mockUpdateDoc).not.toHaveBeenCalled();
 
@@ -187,7 +188,8 @@ describe('First-Time Nonexistent Document Get -> Create/Update & Permission Erro
               judgeId: 'judge_1',
               criterionName: 'Innovation',
               weight: 100,
-              score: 8,
+              score: 80,
+              scoreScale: '0_to_100',
               comment: 'Solid'
             })
           }
@@ -205,7 +207,7 @@ describe('First-Time Nonexistent Document Get -> Create/Update & Permission Erro
     );
     expect(mockSetDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'evaluations/sub_m3abc_9f8e7d_judge_1/criteria/crit_1' }),
-      expect.objectContaining({ criterionId: 'crit_1', score: 8, weight: 100 })
+      expect.objectContaining({ criterionId: 'crit_1', score: 80, scoreScale: '0_to_100', weight: 100 })
     );
     expect(mockUpdateDoc).toHaveBeenNthCalledWith(
       2,

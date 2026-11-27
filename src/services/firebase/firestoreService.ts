@@ -61,7 +61,8 @@ import type {
 import {
   calculateWeightedTotal,
   calculateWeightedTotalStrict,
-  hydrateEvaluationScoresAndTotal
+  hydrateEvaluationScoresAndTotal,
+  validateRubricWeights
 } from '../judging/fairJudgingEngine';
 
 // --- Admin Check ---
@@ -434,6 +435,19 @@ export async function saveHackathon(
   const regAt = parseOptionalDeadlineTimestamp(hackathon.registrationDeadline || '');
   const subAt = parseOptionalDeadlineTimestamp(hackathon.submissionDeadline || '');
 
+  const sanitizedRubric = (hackathon.rubric || []).slice(0, 10).map((item) => ({
+    id: sanitizeString(item.id || '', 80),
+    name: sanitizeString(item.name || '', 120),
+    description: sanitizeString(item.description || '', 500),
+    weight: Number(item.weight)
+  }));
+  if (sanitizedRubric.length > 0) {
+    const rubricCheck = validateRubricWeights(sanitizedRubric);
+    if (!rubricCheck.valid) {
+      throw new Error(rubricCheck.error || 'Rubric weights must sum to 100%.');
+    }
+  }
+
   const payload = {
     id: hackathon.id,
     organizerId: hackathon.organizerId,
@@ -456,7 +470,7 @@ export async function saveHackathon(
     rules: sanitizeString(hackathon.rules || '', 6000),
     prizes: sanitizeStringArray(hackathon.prizes || [], 10, 120),
     sponsors: sanitizeStringArray(hackathon.sponsors || [], 10, 100),
-    rubric: (hackathon.rubric || []).slice(0, 10),
+    rubric: sanitizedRubric,
     maxTeamSize: Math.min(10, Math.max(1, Math.round(hackathon.maxTeamSize || 4))),
     status: hackathon.status,
     resultsPublished: Boolean(hackathon.resultsPublished)
@@ -2149,6 +2163,7 @@ export async function saveCriterionScoreDraft(params: {
       criterionName: sanitizeString(params.criterion.criterionName || '', 120),
       weight: Number(params.criterion.weight),
       score: Number(params.criterion.score),
+      scoreScale: params.criterion.scoreScale ?? ('0_to_100' as const),
       comment: sanitizeString(params.criterion.comment || '', 1000),
       updatedAt: serverTimestamp()
     };
@@ -2185,7 +2200,7 @@ export async function saveEvaluation(
     const conflict = Boolean(evaluation.conflictOfInterest);
     const submitFinal = evaluation.status === 'submitted';
 
-    // Deduplicate and sanitize incoming criterion scores
+    // Deduplicate and sanitize incoming criterion scores on canonical 0-100 scale
     const dedupedMap = new Map<string, CriterionScore>();
     if (!conflict) {
       for (const rawItem of evaluation.criteriaScores || []) {
@@ -2195,6 +2210,7 @@ export async function saveEvaluation(
           criterionName: sanitizeString(rawItem.criterionName || '', 120) || rawItem.criterionId,
           weight: Number(rawItem.weight),
           score: Number(rawItem.score),
+          scoreScale: rawItem.scoreScale ?? '0_to_100',
           comment: sanitizeString(rawItem.comment || '', 1000)
         });
       }
@@ -2236,6 +2252,7 @@ export async function saveEvaluation(
     const mutableParent = {
       criteriaScores: [] as CriterionScore[],
       weightedTotal: computedWeightedTotal,
+      scoreScale: '0_to_100' as const,
       scoredCriterionCount: desiredScores.length,
       storageSchema: 'v2_subcollection' as const,
       conflictOfInterest: conflict,
@@ -2291,6 +2308,7 @@ export async function saveEvaluation(
           prev.criterionName !== item.criterionName ||
           Math.abs(Number(prev.weight) - item.weight) > 0.0001 ||
           Math.abs(Number(prev.score) - item.score) > 0.0001 ||
+          (prev.scoreScale ?? '') !== (item.scoreScale ?? '0_to_100') ||
           (prev.comment || '') !== item.comment
         );
       });
@@ -2306,6 +2324,7 @@ export async function saveEvaluation(
           criterionName: item.criterionName,
           weight: item.weight,
           score: item.score,
+          scoreScale: item.scoreScale ?? ('0_to_100' as const),
           comment: item.comment,
           updatedAt: serverTimestamp()
         };
@@ -2329,6 +2348,7 @@ export async function saveEvaluation(
           status: 'submitted',
           criteriaScores: [],
           weightedTotal: 0,
+          scoreScale: '0_to_100',
           scoredCriterionCount: 0,
           storageSchema: 'v2_subcollection',
           submittedAt: serverTimestamp(),
@@ -2340,6 +2360,7 @@ export async function saveEvaluation(
           criterionName: d.criterionName,
           weight: Number(d.weight),
           score: Number(d.score),
+          scoreScale: d.scoreScale ?? '0_to_100',
           comment: d.comment || ''
         }));
 
@@ -2358,6 +2379,7 @@ export async function saveEvaluation(
           status: 'submitted',
           criteriaScores: [],
           weightedTotal: strictVerify.weightedTotal,
+          scoreScale: '0_to_100',
           scoredCriterionCount: verifiedScores.length,
           storageSchema: 'v2_subcollection',
           submittedAt: serverTimestamp(),
@@ -2544,7 +2566,7 @@ export async function listDerivedUserActivity(userId: string): Promise<DerivedAc
         type: 'judge_assignment',
         title: `Judging Invitation (${a.assignedSubmissionIds.length} submissions)`,
         message: `Review and accept or decline judging assignment for hackathon ${a.hackathonId}.`,
-        link: '/app/judging',
+        link: '/app/judging-v2',
         actionRequired: true,
         timestampMs: toTimestampMs(a.updatedAt) || toTimestampMs(a.createdAt)
       });

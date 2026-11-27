@@ -93,11 +93,11 @@ describe('Fair Judging Engine', () => {
         { id: '1', name: 'Innovation', description: '', weight: 40 },
         { id: '2', name: 'Tech', description: '', weight: 40 }
       ])
-    ).toEqual({ valid: false, sum: 80 });
+    ).toMatchObject({ valid: false, sum: 80 });
 
     const total = calculateWeightedTotal([
-      { criterionId: '1', criterionName: 'Innovation', weight: 50, score: 8, comment: '' },
-      { criterionId: '2', criterionName: 'Tech', weight: 50, score: 10, comment: '' }
+      { criterionId: '1', criterionName: 'Innovation', weight: 50, score: 80, scoreScale: '0_to_100', comment: '' },
+      { criterionId: '2', criterionName: 'Tech', weight: 50, score: 100, scoreScale: '0_to_100', comment: '' }
     ]);
     expect(total).toBe(90);
   });
@@ -188,7 +188,7 @@ describe('Fair Judging Engine', () => {
     expect(reloadedPartial[1].scored).toBe(false);
 
     // Scoring remaining criterion unlocks final submission
-    const completed = setHumanCriterionScore(reloadedPartial, 1, 9);
+    const completed = setHumanCriterionScore(reloadedPartial, 1, 90);
     const finalAllowed = validateEvaluationSubmission({
       criteriaScores: completed,
       conflictOfInterest: false,
@@ -205,17 +205,18 @@ describe('Fair Judging Engine', () => {
     expect(cleared[1].scored).toBe(false);
     expect(cleared[1].score).toBeNull();
 
-    // Existing saved submitted evaluation (including historical score of 7) loads untouched
+    // Existing saved submitted evaluation on canonical 0-100 scale loads untouched
     const savedSubmitted = initializeHumanCriteriaScores(rubric, {
       status: 'submitted',
+      scoreScale: '0_to_100',
       criteriaScores: [
-        { criterionId: 'c1', criterionName: 'Innovation', weight: 40, score: 7, comment: 'Good' },
-        { criterionId: 'c2', criterionName: 'Execution', weight: 60, score: 8, comment: 'Solid' }
+        { criterionId: 'c1', criterionName: 'Innovation', weight: 40, score: 70, scoreScale: '0_to_100', comment: 'Good' },
+        { criterionId: 'c2', criterionName: 'Execution', weight: 60, score: 80, scoreScale: '0_to_100', comment: 'Solid' }
       ]
     });
     expect(savedSubmitted.every((c) => c.scored)).toBe(true);
-    expect(savedSubmitted[0].score).toBe(7);
-    expect(savedSubmitted[1].score).toBe(8);
+    expect(savedSubmitted[0].score).toBe(70);
+    expect(savedSubmitted[1].score).toBe(80);
   });
 
   it('excludes conflicts of interest and flags judge disagreement anomalies', () => {
@@ -485,13 +486,13 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
     });
     expect(negativeScore.valid).toBe(false);
 
-    const overTenScore = validateEvaluationSubmission({
-      criteriaScores: [{ ...baseValid, weight: 100, score: 11 }],
+    const overHundredScore = validateEvaluationSubmission({
+      criteriaScores: [{ ...baseValid, weight: 100, score: 101 }],
       conflictOfInterest: false,
       conflictReason: '',
       submitFinal: false
     });
-    expect(overTenScore.valid).toBe(false);
+    expect(overHundredScore.valid).toBe(false);
 
     const zeroTotalWeight = validateEvaluationSubmission({
       criteriaScores: [{ ...baseValid, weight: 0, score: 8 }],
@@ -533,7 +534,16 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
       ]
     });
     expect(synced).toHaveLength(2);
-    expect(synced[0]).toMatchObject({ criterionId: 'c1', weight: 30, score: 9, scored: true, comment: 'Strong' });
+    expect(synced[0]).toMatchObject({
+      criterionId: 'c1',
+      weight: 30,
+      score: 90,
+      scoreScale: '0_to_100',
+      convertedFromScale: '0_to_10',
+      originalScore: 9,
+      scored: true,
+      comment: 'Strong'
+    });
     expect(synced[1]).toMatchObject({ criterionId: 'c2', weight: 70, score: null, scored: false });
   });
 
@@ -575,10 +585,10 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
 
     const strictValid = calculateWeightedTotalStrict(
       [
-        { criterionId: 'c1', criterionName: 'Innovation', weight: 25, score: 8.5, comment: '' },
-        { criterionId: 'c2', criterionName: 'Technical Depth', weight: 30, score: 7.5, comment: '' },
-        { criterionId: 'c3', criterionName: 'Impact', weight: 20, score: 9, comment: '' },
-        { criterionId: 'c4', criterionName: 'Presentation', weight: 25, score: 8, comment: '' }
+        { criterionId: 'c1', criterionName: 'Innovation', weight: 25, score: 85, scoreScale: '0_to_100', comment: '' },
+        { criterionId: 'c2', criterionName: 'Technical Depth', weight: 30, score: 75, scoreScale: '0_to_100', comment: '' },
+        { criterionId: 'c3', criterionName: 'Impact', weight: 20, score: 90, scoreScale: '0_to_100', comment: '' },
+        { criterionId: 'c4', criterionName: 'Presentation', weight: 25, score: 80, scoreScale: '0_to_100', comment: '' }
       ],
       rubric
     );
@@ -586,10 +596,10 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
 
     const strictBadWeight = calculateWeightedTotalStrict(
       [
-        { criterionId: 'c1', criterionName: 'Innovation', weight: 50, score: 8, comment: '' },
-        { criterionId: 'c2', criterionName: 'Technical Depth', weight: 30, score: 7, comment: '' },
-        { criterionId: 'c3', criterionName: 'Impact', weight: 20, score: 9, comment: '' },
-        { criterionId: 'c4', criterionName: 'Presentation', weight: 25, score: 8, comment: '' }
+        { criterionId: 'c1', criterionName: 'Innovation', weight: 50, score: 80, comment: '' },
+        { criterionId: 'c2', criterionName: 'Technical Depth', weight: 30, score: 70, comment: '' },
+        { criterionId: 'c3', criterionName: 'Impact', weight: 20, score: 90, comment: '' },
+        { criterionId: 'c4', criterionName: 'Presentation', weight: 25, score: 80, comment: '' }
       ],
       rubric
     );
@@ -616,10 +626,10 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
     };
 
     const hydrated = hydrateEvaluationScoresAndTotal(parentForged, [
-      { criterionId: 'c1', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Innovation', weight: 25, score: 8.5, comment: '' },
-      { criterionId: 'c2', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Technical Depth', weight: 30, score: 7.5, comment: '' },
-      { criterionId: 'c3', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Impact', weight: 20, score: 9, comment: '' },
-      { criterionId: 'c4', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Presentation', weight: 25, score: 8, comment: '' }
+      { criterionId: 'c1', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Innovation', weight: 25, score: 85, scoreScale: '0_to_100', comment: '' },
+      { criterionId: 'c2', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Technical Depth', weight: 30, score: 75, scoreScale: '0_to_100', comment: '' },
+      { criterionId: 'c3', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Impact', weight: 20, score: 90, scoreScale: '0_to_100', comment: '' },
+      { criterionId: 'c4', evaluationId: 'sub_1_j1', hackathonId: 'h1', submissionId: 'sub_1', judgeId: 'j1', criterionName: 'Presentation', weight: 25, score: 80, scoreScale: '0_to_100', comment: '' }
     ]);
     expect(hydrated.weightedTotal).toBe(81.75);
     expect(hydrated.criteriaScores).toHaveLength(4);
@@ -780,15 +790,40 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
       status: 'submitted'
     };
 
-    // No /criteria subcollection docs exist yet -> falls back cleanly to v1_inline
+    // No /criteria subcollection docs exist yet -> falls back cleanly to v1_inline & converts legacy 0-10 non-destructively once
     const hydratedSubmitted = hydrateEvaluationScoresAndTotal(legacySubmitted, [], rubric);
     expect(hydratedSubmitted.id).toBe('sub_v1_j1');
     expect(hydratedSubmitted.storageSchema).toBe('v1_inline');
+    expect(hydratedSubmitted.scoreScale).toBe('0_to_100');
+    expect(hydratedSubmitted.convertedFromScale).toBe('0_to_10');
     expect(hydratedSubmitted.weightedTotal).toBe(86);
     expect(hydratedSubmitted.criteriaScores).toEqual([
-      { criterionId: 'c1', criterionName: 'Innovation', weight: 40, score: 8, comment: 'Inline comment c1' },
-      { criterionId: 'c2', criterionName: 'Execution', weight: 60, score: 9, comment: 'Inline comment c2' }
+      {
+        criterionId: 'c1',
+        criterionName: 'Innovation',
+        weight: 40,
+        score: 80,
+        scoreScale: '0_to_100',
+        convertedFromScale: '0_to_10',
+        originalScore: 8,
+        comment: 'Inline comment c1'
+      },
+      {
+        criterionId: 'c2',
+        criterionName: 'Execution',
+        weight: 60,
+        score: 90,
+        scoreScale: '0_to_100',
+        convertedFromScale: '0_to_10',
+        originalScore: 9,
+        comment: 'Inline comment c2'
+      }
     ]);
+
+    // Re-hydrating an already-converted evaluation must NEVER double-convert
+    const rehydrated = hydrateEvaluationScoresAndTotal(hydratedSubmitted, [], rubric);
+    expect(rehydrated.weightedTotal).toBe(86);
+    expect(rehydrated.criteriaScores.map((c) => c.score)).toEqual([80, 90]);
 
     const rankings = computeFairRankings({
       submissions: [sub],
@@ -816,7 +851,10 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
         criterionId: 'c1',
         criterionName: 'Innovation',
         weight: 40,
-        score: 7,
+        score: 70,
+        scoreScale: '0_to_100',
+        convertedFromScale: '0_to_10',
+        originalScore: 7,
         scored: true,
         comment: 'Draft inline comment'
       },
@@ -825,6 +863,7 @@ describe('JudgeWorkspaceRunCoordinator — Cancel, AbortController & Submission 
         criterionName: 'Execution',
         weight: 60,
         score: null,
+        scoreScale: '0_to_100',
         scored: false,
         comment: ''
       }

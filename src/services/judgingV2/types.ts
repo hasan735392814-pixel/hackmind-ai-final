@@ -1,6 +1,8 @@
 import type { InferenceMode } from 'firebase/ai';
 import type { InspectedRepoFile, SkippedRepoFile } from '../github/repoInspector';
 
+import type { ScoreScale } from '../../types/domain';
+
 export type OfficialCriterionId =
   | 'innovation_originality'
   | 'technical_implementation'
@@ -17,6 +19,19 @@ export interface OfficialCriterionDefinition {
   descriptionAr: string;
   evidenceStandard: string;
   evidenceStandardAr: string;
+}
+
+export interface ActiveCriterionDefinition {
+  id: string;
+  name: string;
+  nameAr: string;
+  weight: number;
+  weightPercent: number;
+  description: string;
+  descriptionAr: string;
+  evidenceStandard: string;
+  evidenceStandardAr: string;
+  isOfficial?: boolean;
 }
 
 export type EvidenceStatus =
@@ -324,10 +339,17 @@ export interface EvidenceVersionResolution {
 }
 
 export interface HumanCriterionEvaluation {
-  criterionId: OfficialCriterionId;
+  criterionId: string;
+  criterionName?: string;
+  weightPercent?: number;
   score: number | null;
+  scoreScale?: ScoreScale;
+  convertedFromScale?: ScoreScale;
+  originalScore?: number;
   rationale: string;
 }
+
+export type EvaluationSyncState = 'synced' | 'local_draft' | 'sync_error' | 'finalizing';
 
 export interface HumanJudgingEvaluation {
   id: string;
@@ -337,13 +359,22 @@ export interface HumanJudgingEvaluation {
   judgeName: string;
   criteriaVersion: string;
   status: 'draft' | 'approved';
-  criteria: Record<OfficialCriterionId, HumanCriterionEvaluation>;
+  firestoreStatus?: 'draft' | 'finalizing' | 'submitted';
+  scoreScale?: ScoreScale;
+  convertedFromScale?: ScoreScale;
+  conflictOfInterest?: boolean;
+  conflictReason?: string;
+  criteria: Record<string, HumanCriterionEvaluation>;
   finalWeightedScore: number | null;
   overallComments: string;
   workflowChecks: ObservableWorkflowCheck[];
   aiRecommendationSnapshot: AIJudgingRecommendation | null;
   approvedAt: string | null;
   updatedAt: string;
+  syncState?: EvaluationSyncState;
+  syncError?: string | null;
+  hasLocalUnsavedChanges?: boolean;
+  needsFinalizingRecovery?: boolean;
 }
 
 export interface QuotaGuardState {

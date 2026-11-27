@@ -212,11 +212,16 @@ export interface JudgeAssignment {
   updatedAt?: unknown;
 }
 
+export type ScoreScale = '0_to_10' | '0_to_100';
+
 export interface CriterionScore {
   criterionId: string;
   criterionName: string;
   weight: number;
   score: number;
+  scoreScale?: ScoreScale;
+  convertedFromScale?: ScoreScale;
+  originalScore?: number;
   comment: string;
 }
 
@@ -244,6 +249,7 @@ export interface NormalizedEvaluationCriterionDoc {
   criterionName: string;
   weight: number;
   score: number;
+  scoreScale?: ScoreScale;
   comment: string;
   updatedAt?: unknown;
 }
@@ -257,6 +263,8 @@ export interface Evaluation {
   judgeName: string;
   criteriaScores: CriterionScore[];
   weightedTotal: number;
+  scoreScale?: ScoreScale;
+  convertedFromScale?: ScoreScale;
   scoredCriterionCount?: number;
   storageSchema?: EvaluationStorageSchema;
   conflictOfInterest: boolean;

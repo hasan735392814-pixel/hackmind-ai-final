@@ -31,7 +31,11 @@ const mockFirestoreFns = vi.hoisted(() => ({
   getHackathonById: vi.fn(),
   listJudgeAssignedSubmissions: vi.fn(),
   listJudgeAssignmentsByJudge: vi.fn(),
-  listOrganizerSubmissions: vi.fn()
+  listJudgeEvaluations: vi.fn(),
+  listOrganizerEvaluations: vi.fn(),
+  listOrganizerSubmissions: vi.fn(),
+  saveEvaluation: vi.fn(),
+  updateJudgeAssignmentResponse: vi.fn()
 }));
 
 const mockCollectProjectEvidence = vi.hoisted(() => vi.fn());
@@ -384,8 +388,12 @@ describe('Judging V2 UI — Persisted Coverage Reconciliation & Stale Checkpoint
 
     mockFirestoreFns.listJudgeAssignedSubmissions.mockResolvedValue([culturePulseSubmission]);
     mockFirestoreFns.listJudgeAssignmentsByJudge.mockResolvedValue([judgeAssignment]);
+    mockFirestoreFns.listJudgeEvaluations.mockResolvedValue([]);
+    mockFirestoreFns.listOrganizerEvaluations.mockResolvedValue([]);
     mockFirestoreFns.listOrganizerSubmissions.mockResolvedValue([]);
     mockFirestoreFns.getHackathonById.mockResolvedValue(culturePulseHackathon);
+    mockFirestoreFns.saveEvaluation.mockResolvedValue(undefined);
+    mockFirestoreFns.updateJudgeAssignmentResponse.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InferenceMode } from 'firebase/ai';
 import { Link } from 'react-router-dom';
-import { ExternalLink, FolderGit2, Gavel, ShieldCheck } from 'lucide-react';
+import { ExternalLink, FolderGit2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import {
   getHackathonById,
   listJudgeAssignedSubmissions,
   listJudgeAssignmentsByJudge,
-  listOrganizerSubmissions
+  listJudgeEvaluations,
+  listOrganizerEvaluations,
+  listOrganizerSubmissions,
+  saveEvaluation,
+  updateJudgeAssignmentResponse
 } from '../services/firebase/firestoreService';
 import type { InspectedRepoFile, SkippedRepoFile } from '../services/github/repoInspector';
+import { JudgeWorkspaceRunCoordinator } from '../services/judging/fairJudgingEngine';
 import {
   ANALYSIS_VERSION,
   CRITERIA_VERSION,
   EVIDENCE_COLLECTOR_VERSION,
-  OFFICIAL_JUDGING_CRITERIA
+  resolveActiveRubricCriteria,
+  validateCriteriaScoresForRubric
 } from '../services/judgingV2/criteria';
 import {
   buildAnalysisCacheKey,
@@ -30,12 +36,15 @@ import { evaluateSubmissionEligibility } from '../services/judgingV2/eligibility
 import { collectProjectEvidence } from '../services/judgingV2/evidenceCollector';
 import { sanitizeSubmissionWithoutVideo } from '../services/judgingV2/evidenceSanitizer';
 import {
+  alignEvaluationToActiveCriteria,
   attachAIRecommendationSafely,
+  cacheHumanEvaluationLocally,
   createEmptyHumanEvaluation,
-  finalizeAndApproveHumanEvaluation,
   loadHumanEvaluation,
-  saveHumanEvaluationDraft,
-  setHumanCriterionScoreV2
+  reconcileEvaluationWithFirestore,
+  setHumanConflictOfInterestV2,
+  setHumanCriterionScoreV2,
+  toFirestoreEvaluationPayload
 } from '../services/judgingV2/humanEvaluationStore';
 import { judgingV2Analyzer } from '../services/judgingV2/quotaProtectedAnalyzer';
 import type {
@@ -45,11 +54,10 @@ import type {
   EvidenceStatus,
   HumanJudgingEvaluation,
   ObservableWorkflowCheck,
-  OfficialCriterionId,
   PersistedEvidenceRecord,
   QuotaGuardState
 } from '../services/judgingV2/types';
-import type { Hackathon, ProjectSubmission } from '../types/domain';
+import type { Evaluation, Hackathon, JudgeAssignment, ProjectSubmission } from '../types/domain';
 import { AIRecommendationsPanel } from '../components/judgingV2/AIRecommendationsPanel';
 import { EligibilitySection } from '../components/judgingV2/EligibilitySection';
 import { EvidenceCoveragePanel } from '../components/judgingV2/EvidenceCoveragePanel';
@@ -59,15 +67,22 @@ import { QuotaAndJobControlBar } from '../components/judgingV2/QuotaAndJobContro
 
 export function EvidenceJudgingPage() {
   const { user, profile, privateInfo, isAdmin, emailVerified, updateCloudConsent } = useAuth();
-  const { locale } = useLanguage();
+  const { locale, t } = useLanguage();
   const isAr = locale === 'ar';
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<JudgeAssignment[]>([]);
   const [submissions, setSubmissions] = useState<ProjectSubmission[]>([]);
   const [assignedSubmissionIds, setAssignedSubmissionIds] = useState<string[]>([]);
   const [hackathonsMap, setHackathonsMap] = useState<Record<string, Hackathon>>({});
+  const [activeHackathon, setActiveHackathon] = useState<Hackathon | null>(null);
+  const [firestoreEvaluationsBySub, setFirestoreEvaluationsBySub] = useState<
+    Record<string, Evaluation>
+  >({});
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
 
   const [guardState, setGuardState] = useState<QuotaGuardState>(() => judgingV2Analyzer.getState());
   const [preferredMode, setPreferredMode] = useState<InferenceMode>(InferenceMode.ONLY_IN_CLOUD);
@@ -89,6 +104,7 @@ export function EvidenceJudgingPage() {
     null
   );
 
+  const coordinatorRef = useRef(new JudgeWorkspaceRunCoordinator());
   const abortControllerRef = useRef<AbortController | null>(null);
   const evidenceBundlesRef = useRef<Record<string, EvidenceBundle>>({});
   useEffect(() => {
@@ -102,6 +118,10 @@ export function EvidenceJudgingPage() {
   useEffect(() => {
     attachedTestLogRef.current = attachedTestLog;
   }, [attachedTestLog]);
+  const hackathonsMapRef = useRef<Record<string, Hackathon>>({});
+  useEffect(() => {
+    hackathonsMapRef.current = hackathonsMap;
+  }, [hackathonsMap]);
   const autoUpgradedSubIdsRef = useRef<Set<string>>(new Set());
   const resumeFilesRef = useRef<
     Record<
@@ -117,68 +137,161 @@ export function EvidenceJudgingPage() {
 
   const isOrganizerOrAdmin = Boolean(isAdmin || profile?.approvedRole === 'organizer');
 
-  const loadAssignedWork = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const [judgeSubs, judgeAssignments, orgSubs] = await Promise.all([
-        listJudgeAssignedSubmissions(user.uid).catch(() => []),
-        listJudgeAssignmentsByJudge(user.uid).catch(() => []),
-        isOrganizerOrAdmin ? listOrganizerSubmissions(user.uid).catch(() => []) : Promise.resolve([])
-      ]);
-
-      const acceptedIds = Array.from(
-        new Set(
-          judgeAssignments
-            .filter((a) => a.status === 'accepted' && !a.conflictDeclared)
-            .flatMap((a) => a.assignedSubmissionIds || [])
-        )
-      );
-      setAssignedSubmissionIds(acceptedIds);
-
-      const mergedById = new Map<string, ProjectSubmission>();
-      for (const s of [...judgeSubs, ...orgSubs]) {
-        mergedById.set(s.id, s);
+  const resolveHackathonForSubmission = useCallback(
+    async (sub: ProjectSubmission, selectionSeq: number, knownMap = hackathonsMapRef.current) => {
+      const cached = knownMap[sub.hackathonId] || null;
+      if (cached) {
+        if (coordinatorRef.current.isCurrentSelection(selectionSeq)) {
+          setActiveHackathon(cached);
+        }
+        return;
       }
-      const combined = Array.from(mergedById.values());
-      setSubmissions(combined);
-
-      const uniqueHackathonIds = Array.from(
-        new Set(combined.map((s) => s.hackathonId).filter(Boolean))
-      );
-      const hackathons = await Promise.all(
-        uniqueHackathonIds.map((hid) => getHackathonById(hid).catch(() => null))
-      );
-      const hMap: Record<string, Hackathon> = {};
-      for (const h of hackathons) {
-        if (h) hMap[h.id] = h;
+      setActiveHackathon(null);
+      const fetched = await getHackathonById(sub.hackathonId).catch(() => null);
+      if (!coordinatorRef.current.isCurrentSelection(selectionSeq)) return;
+      setActiveHackathon(fetched);
+      if (fetched) {
+        setHackathonsMap((prev) => ({ ...prev, [fetched.id]: fetched }));
       }
-      setHackathonsMap(hMap);
+    },
+    []
+  );
 
-      if (combined.length > 0) {
-        setSelectedSubmissionId((prev) =>
-          prev && mergedById.has(prev) ? prev : combined[0].id
+  const loadAssignedWork = useCallback(
+    async (
+      preferredSubmissionId?: string | null,
+      options: { silent?: boolean; preserveSelectionIfUnchanged?: boolean } = {}
+    ) => {
+      if (!user) return;
+      const loadSeq = coordinatorRef.current.beginLoad();
+      if (!options.silent) {
+        setLoading(true);
+      }
+      setLoadError(null);
+      let evalReadError: string | null = null;
+
+      try {
+        const [judgeSubs, judgeAssignments, judgeEvals, orgSubs, orgEvals] = await Promise.all([
+          listJudgeAssignedSubmissions(user.uid).catch(() => []),
+          listJudgeAssignmentsByJudge(user.uid).catch(() => []),
+          listJudgeEvaluations(user.uid).catch((err) => {
+            evalReadError =
+              err instanceof Error
+                ? err.message
+                : 'Unable to load saved Firestore evaluations.';
+            return [] as Evaluation[];
+          }),
+          isOrganizerOrAdmin ? listOrganizerSubmissions(user.uid).catch(() => []) : Promise.resolve([]),
+          isOrganizerOrAdmin ? listOrganizerEvaluations(user.uid).catch(() => []) : Promise.resolve([])
+        ]);
+
+        if (!coordinatorRef.current.isCurrentLoad(loadSeq)) return;
+
+        setAssignments(judgeAssignments);
+        const acceptedIds = Array.from(
+          new Set(
+            judgeAssignments
+              .filter((a) => a.status === 'accepted' && !a.conflictDeclared)
+              .flatMap((a) => a.assignedSubmissionIds || [])
+          )
         );
+        setAssignedSubmissionIds(acceptedIds);
+
+        const mergedById = new Map<string, ProjectSubmission>();
+        for (const s of [...judgeSubs, ...orgSubs]) {
+          mergedById.set(s.id, s);
+        }
+        const combined = Array.from(mergedById.values());
+        setSubmissions(combined);
+
+        const ownEvalMap: Record<string, Evaluation> = {};
+        for (const ev of [...orgEvals, ...judgeEvals]) {
+          if (ev.judgeId === user.uid) {
+            ownEvalMap[ev.submissionId] = ev;
+          }
+        }
+        setFirestoreEvaluationsBySub(ownEvalMap);
+
+        if (evalReadError) {
+          setLoadError(evalReadError);
+        }
+
+        const uniqueHackathonIds = Array.from(
+          new Set(
+            [...combined.map((s) => s.hackathonId), ...judgeAssignments.map((a) => a.hackathonId)].filter(
+              Boolean
+            )
+          )
+        );
+        const hackathons = await Promise.all(
+          uniqueHackathonIds.map((hid) => getHackathonById(hid).catch(() => null))
+        );
+        if (!coordinatorRef.current.isCurrentLoad(loadSeq)) return;
+
+        const hMap: Record<string, Hackathon> = {};
+        for (const h of hackathons) {
+          if (h) hMap[h.id] = h;
+        }
+        setHackathonsMap(hMap);
+
+        if (combined.length > 0) {
+          const requestedId = preferredSubmissionId ?? coordinatorRef.current.currentSubmissionId;
+          const resolvedSub =
+            (requestedId ? mergedById.get(requestedId) : undefined) || combined[0];
+
+          if (
+            options.preserveSelectionIfUnchanged &&
+            coordinatorRef.current.currentSubmissionId === resolvedSub.id
+          ) {
+            if (hMap[resolvedSub.hackathonId]) {
+              setActiveHackathon(hMap[resolvedSub.hackathonId]);
+            }
+            return;
+          }
+
+          const selectionSeq = coordinatorRef.current.beginSubmissionSwitch(resolvedSub.id);
+          setSelectedSubmissionId(resolvedSub.id);
+          await resolveHackathonForSubmission(resolvedSub, selectionSeq, hMap);
+        } else {
+          coordinatorRef.current.beginSubmissionSwitch(null);
+          setSelectedSubmissionId('');
+          setActiveHackathon(null);
+        }
+      } catch (err) {
+        if (coordinatorRef.current.isCurrentLoad(loadSeq)) {
+          setLoadError(
+            err instanceof Error ? err.message : 'Unable to load assigned submissions from Firestore.'
+          );
+        }
+      } finally {
+        if (!options.silent && coordinatorRef.current.isCurrentLoad(loadSeq)) {
+          setLoading(false);
+        }
       }
-    } catch (err) {
-      setLoadError(
-        err instanceof Error ? err.message : 'Unable to load assigned submissions from Firestore.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [isOrganizerOrAdmin, user]);
+    },
+    [isOrganizerOrAdmin, resolveHackathonForSubmission, user]
+  );
 
   useEffect(() => {
+    coordinatorRef.current = new JudgeWorkspaceRunCoordinator();
     void loadAssignedWork();
-  }, [loadAssignedWork]);
-
-  useEffect(() => {
     return () => {
+      coordinatorRef.current.dispose();
       abortControllerRef.current?.abort();
     };
-  }, []);
+  }, [loadAssignedWork]);
+
+  const handleSelectSubmission = useCallback(
+    (sub: ProjectSubmission) => {
+      if (saving || coordinatorRef.current.isSaving) return;
+      const selectionSeq = coordinatorRef.current.beginSubmissionSwitch(sub.id);
+      setSelectedSubmissionId(sub.id);
+      setScoringFeedback(null);
+      setStatusMessage(null);
+      void resolveHackathonForSubmission(sub, selectionSeq);
+    },
+    [resolveHackathonForSubmission, saving]
+  );
 
   const selectedSubmission = useMemo(
     () => submissions.find((s) => s.id === selectedSubmissionId) || null,
@@ -190,10 +303,23 @@ export function EvidenceJudgingPage() {
     [selectedSubmission]
   );
 
-  const selectedHackathon = useMemo(
-    () => (selectedSubmission ? hackathonsMap[selectedSubmission.hackathonId] || null : null),
-    [hackathonsMap, selectedSubmission]
+  const selectedHackathon = useMemo(() => {
+    if (!selectedSubmission) return null;
+    if (activeHackathon && activeHackathon.id === selectedSubmission.hackathonId) {
+      return activeHackathon;
+    }
+    return hackathonsMap[selectedSubmission.hackathonId] || null;
+  }, [activeHackathon, hackathonsMap, selectedSubmission]);
+
+  const rubricResolution = useMemo(
+    () => resolveActiveRubricCriteria(selectedHackathon?.rubric),
+    [selectedHackathon?.rubric]
   );
+  const activeCriteria = rubricResolution.criteria;
+  const isCustomRubric = rubricResolution.isCustom;
+  const rubricError = rubricResolution.validation.valid
+    ? null
+    : rubricResolution.validation.error || 'Invalid hackathon rubric configuration.';
 
   const eligibilityReport = useMemo(
     () =>
@@ -356,7 +482,6 @@ export function EvidenceJudgingPage() {
         });
         setJobStatus(finalStatus);
 
-        // Sync default workflow checks onto draft if empty
         setEvaluations((prev) => {
           const cur = prev[selectedSubmission.id];
           if (!cur || cur.workflowChecks.length > 0) return prev;
@@ -394,11 +519,9 @@ export function EvidenceJudgingPage() {
     [isAr, sanitizedSubmission?.githubUrl, selectedSubmission, user]
   );
 
-  // Restore authoritative persisted evidence, preserve legacy/conflicting versions, and upgrade stale v2.collector.1 caches safely (0 Gemini calls)
+  // Restore evidence bundle & reconcile evaluation with authoritative Firestore state
   useEffect(() => {
     if (!selectedSubmission || !user) return;
-    setScoringFeedback(null);
-    setStatusMessage(null);
     setExplicitAuthorized(false);
     judgingV2Analyzer.setQuotaSafeMode(true);
     setGuardState(judgingV2Analyzer.getState());
@@ -482,19 +605,31 @@ export function EvidenceJudgingPage() {
       };
     }
 
+    const firestoreEval = firestoreEvaluationsBySub[selectedSubmission.id] || null;
     setEvaluations((prev) => {
-      if (prev[selectedSubmission.id]) return prev;
-      const stored = loadHumanEvaluation(selectedSubmission.id, user.uid);
-      const initial =
-        stored ||
-        createEmptyHumanEvaluation({
+      const inMemory = prev[selectedSubmission.id] || null;
+      // If user has active unsaved in-memory edits and Firestore is not locked as submitted,
+      // preserve edits aligned to the latest loaded rubric rather than clobbering keystrokes.
+      if (inMemory?.hasLocalUnsavedChanges && firestoreEval?.status !== 'submitted') {
+        const aligned = alignEvaluationToActiveCriteria(inMemory, activeCriteria);
+        return { ...prev, [selectedSubmission.id]: aligned };
+      }
+
+      const stored = loadHumanEvaluation(selectedSubmission.id, user.uid, activeCriteria);
+      const localCandidate = inMemory || stored || null;
+      const reconciled = reconcileEvaluationWithFirestore({
+        firestoreEval,
+        localDraft: localCandidate,
+        context: {
           submissionId: selectedSubmission.id,
           hackathonId: selectedSubmission.hackathonId,
           judgeId: user.uid,
           judgeName: profile?.displayName || user.displayName || user.email || 'Human Judge',
           workflowChecks: resolvedBundle?.workflowChecks
-        });
-      return { ...prev, [selectedSubmission.id]: initial };
+        },
+        activeCriteria
+      });
+      return { ...prev, [selectedSubmission.id]: reconciled };
     });
 
     if (
@@ -508,7 +643,14 @@ export function EvidenceJudgingPage() {
         expandTruncatedFiles: true
       });
     }
-  }, [selectedSubmission, user, profile?.displayName, handleCollectEvidence]);
+  }, [
+    selectedSubmission,
+    user,
+    profile?.displayName,
+    firestoreEvaluationsBySub,
+    activeCriteria,
+    handleCollectEvidence
+  ]);
 
   const activeBundle = selectedSubmission ? evidenceBundles[selectedSubmission.id] || null : null;
   const activeCheckpoint = selectedSubmission ? checkpoints[selectedSubmission.id] || null : null;
@@ -519,7 +661,8 @@ export function EvidenceJudgingPage() {
           submissionId: selectedSubmission.id,
           hackathonId: selectedSubmission.hackathonId,
           judgeId: user.uid,
-          judgeName: profile?.displayName || user.displayName || user.email || 'Human Judge'
+          judgeName: profile?.displayName || user.displayName || user.email || 'Human Judge',
+          activeCriteria
         })
       : null;
 
@@ -545,11 +688,41 @@ export function EvidenceJudgingPage() {
     activeCheckpoint?.aiRecommendation ||
     null;
 
+  // Authoritative alignment with firestore.rules: requires accepted, non-conflicted judge assignment
   const canApproveAsJudge = Boolean(
-    user &&
-      selectedSubmission &&
-      (isOrganizerOrAdmin || assignedSubmissionIds.includes(selectedSubmission.id))
+    user && selectedSubmission && assignedSubmissionIds.includes(selectedSubmission.id)
   );
+
+  const handleAssignmentResponse = async (
+    assignment: JudgeAssignment,
+    status: 'accepted' | 'declined',
+    conflictDeclared: boolean,
+    conflictNotes: string
+  ) => {
+    if (assignmentBusy || saving) return;
+    setAssignmentBusy(true);
+    setScoringFeedback(null);
+    setLoadError(null);
+    try {
+      await updateJudgeAssignmentResponse({
+        assignmentId: assignment.id,
+        status,
+        conflictDeclared,
+        conflictNotes
+      });
+      await loadAssignedWork(selectedSubmission?.id || null, { silent: true });
+    } catch (err) {
+      setLoadError(
+        err instanceof Error
+          ? err.message
+          : isAr
+            ? 'تعذر تحديث حالة تكليف التحكيم.'
+            : 'Failed to update judge assignment response.'
+      );
+    } finally {
+      setAssignmentBusy(false);
+    }
+  };
 
   const handleToggleAuthorizeGemini = (authorized: boolean) => {
     setExplicitAuthorized(authorized);
@@ -597,12 +770,14 @@ export function EvidenceJudgingPage() {
         : wf
     );
 
+    const updatedEval: HumanJudgingEvaluation = {
+      ...activeEvaluation,
+      workflowChecks: nextChecks
+    };
+    cacheHumanEvaluationLocally(updatedEval);
     setEvaluations((prev) => ({
       ...prev,
-      [selectedSubmission.id]: {
-        ...activeEvaluation,
-        workflowChecks: nextChecks
-      }
+      [selectedSubmission.id]: updatedEval
     }));
 
     if (activeBundle) {
@@ -628,9 +803,11 @@ export function EvidenceJudgingPage() {
     setEvaluations((prev) => {
       const current = prev[selectedSubmission.id];
       if (!current) return prev;
+      const updated = attachAIRecommendationSafely(current, cached);
+      cacheHumanEvaluationLocally(updated);
       return {
         ...prev,
-        [selectedSubmission.id]: attachAIRecommendationSafely(current, cached)
+        [selectedSubmission.id]: updated
       };
     });
     setStatusMessage(
@@ -696,9 +873,11 @@ export function EvidenceJudgingPage() {
       setEvaluations((prev) => {
         const current = prev[selectedSubmission.id];
         if (!current) return prev;
+        const updated = attachAIRecommendationSafely(current, res.recommendation);
+        cacheHumanEvaluationLocally(updated);
         return {
           ...prev,
-          [selectedSubmission.id]: attachAIRecommendationSafely(current, res.recommendation)
+          [selectedSubmission.id]: updated
         };
       });
 
@@ -751,9 +930,11 @@ export function EvidenceJudgingPage() {
       setEvaluations((prev) => {
         const cur = prev[selectedSubmission.id];
         if (!cur) return prev;
+        const updated = attachAIRecommendationSafely(cur, null);
+        cacheHumanEvaluationLocally(updated);
         return {
           ...prev,
-          [selectedSubmission.id]: attachAIRecommendationSafely(cur, null)
+          [selectedSubmission.id]: updated
         };
       });
     }
@@ -773,10 +954,17 @@ export function EvidenceJudgingPage() {
     );
   };
 
-  const handleHumanScoreChange = (criterionId: OfficialCriterionId, score: number | null) => {
+  const handleHumanScoreChange = (criterionId: string, score: number | null) => {
     if (!selectedSubmission || !activeEvaluation) return;
     try {
-      const updated = setHumanCriterionScoreV2(activeEvaluation, criterionId, score);
+      const updated = setHumanCriterionScoreV2(
+        activeEvaluation,
+        criterionId,
+        score,
+        undefined,
+        activeCriteria
+      );
+      cacheHumanEvaluationLocally(updated);
       setEvaluations((prev) => ({ ...prev, [selectedSubmission.id]: updated }));
       setScoringFeedback(null);
     } catch (err) {
@@ -787,11 +975,18 @@ export function EvidenceJudgingPage() {
     }
   };
 
-  const handleHumanRationaleChange = (criterionId: OfficialCriterionId, rationale: string) => {
+  const handleHumanRationaleChange = (criterionId: string, rationale: string) => {
     if (!selectedSubmission || !activeEvaluation) return;
     try {
-      const currentScore = activeEvaluation.criteria[criterionId].score;
-      const updated = setHumanCriterionScoreV2(activeEvaluation, criterionId, currentScore, rationale);
+      const currentScore = activeEvaluation.criteria[criterionId]?.score ?? null;
+      const updated = setHumanCriterionScoreV2(
+        activeEvaluation,
+        criterionId,
+        currentScore,
+        rationale,
+        activeCriteria
+      );
+      cacheHumanEvaluationLocally(updated);
       setEvaluations((prev) => ({ ...prev, [selectedSubmission.id]: updated }));
       setScoringFeedback(null);
     } catch (err) {
@@ -804,69 +999,251 @@ export function EvidenceJudgingPage() {
 
   const handleOverallCommentsChange = (comments: string) => {
     if (!selectedSubmission || !activeEvaluation || activeEvaluation.status === 'approved') return;
+    const updated: HumanJudgingEvaluation = {
+      ...activeEvaluation,
+      overallComments: comments,
+      hasLocalUnsavedChanges: true,
+      syncState: 'local_draft',
+      updatedAt: new Date().toISOString()
+    };
+    cacheHumanEvaluationLocally(updated);
     setEvaluations((prev) => ({
       ...prev,
-      [selectedSubmission.id]: {
-        ...activeEvaluation,
-        overallComments: comments,
-        updatedAt: new Date().toISOString()
-      }
+      [selectedSubmission.id]: updated
     }));
   };
 
-  const handleSaveDraft = () => {
-    if (!selectedSubmission || !activeEvaluation || !user) return;
+  const handleToggleCoi = (coi: boolean) => {
+    if (!selectedSubmission || !activeEvaluation) return;
     try {
-      const saved = saveHumanEvaluationDraft({
-        evaluation: activeEvaluation,
-        actorUid: user.uid,
-        assignedSubmissionIds,
-        isOrganizerOrAdmin
-      });
-      setEvaluations((prev) => ({ ...prev, [selectedSubmission.id]: saved }));
-      setScoringFeedback({
-        type: 'ok',
-        text: isAr
-          ? 'تم حفظ مسودة التقييم في المتصفح (localStorage).'
-          : 'Human judge draft saved to browser localStorage.'
-      });
+      const updated = setHumanConflictOfInterestV2(activeEvaluation, coi);
+      cacheHumanEvaluationLocally(updated);
+      setEvaluations((prev) => ({ ...prev, [selectedSubmission.id]: updated }));
+      setScoringFeedback(null);
     } catch (err) {
       setScoringFeedback({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to save draft.'
+        text: err instanceof Error ? err.message : 'Unable to update conflict of interest.'
       });
     }
   };
 
-  const handleApproveOfficial = () => {
-    if (!selectedSubmission || !activeEvaluation || !user) return;
+  const handleCoiReasonChange = (reason: string) => {
+    if (!selectedSubmission || !activeEvaluation) return;
     try {
-      const approved = finalizeAndApproveHumanEvaluation({
-        evaluation: activeEvaluation,
-        actorUid: user.uid,
-        assignedSubmissionIds,
-        isOrganizerOrAdmin
-      });
-      setEvaluations((prev) => ({ ...prev, [selectedSubmission.id]: approved }));
-      setScoringFeedback({
-        type: 'ok',
-        text: isAr
-          ? `تم اعتماد النتيجة الرسمية النهائية: ${approved.finalWeightedScore?.toFixed(2)}/100 وتم إغلاق التقييم.`
-          : `Official evaluation approved & locked: ${approved.finalWeightedScore?.toFixed(2)}/100.`
-      });
+      const updated = setHumanConflictOfInterestV2(
+        activeEvaluation,
+        Boolean(activeEvaluation.conflictOfInterest),
+        reason
+      );
+      cacheHumanEvaluationLocally(updated);
+      setEvaluations((prev) => ({ ...prev, [selectedSubmission.id]: updated }));
+      setScoringFeedback(null);
     } catch (err) {
       setScoringFeedback({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Unable to approve evaluation.'
+        text: err instanceof Error ? err.message : 'Unable to update conflict reason.'
       });
     }
+  };
+
+  const persistEvaluationToFirestore = async (submitFinal: boolean) => {
+    if (saving || coordinatorRef.current.isSaving) return;
+    if (!selectedSubmission || !activeEvaluation || !user) return;
+
+    if (!emailVerified) {
+      setScoringFeedback({
+        type: 'error',
+        text: isAr
+          ? 'يلزم توثيق البريد الإلكتروني لحفظ التقييمات في Firestore.'
+          : 'Verified email address required to save evaluations to Firestore.'
+      });
+      return;
+    }
+
+    if (!canApproveAsJudge) {
+      setScoringFeedback({
+        type: 'error',
+        text: isAr
+          ? 'يجب قبول تكليف التحكيم لهذا التسليم دون تعارض مصالح قبل الحفظ أو الاعتماد.'
+          : 'An accepted, unconflicted judge assignment covering this submission is required.'
+      });
+      return;
+    }
+
+    if (activeEvaluation.status === 'approved' || firestoreEvaluationsBySub[selectedSubmission.id]?.status === 'submitted') {
+      setScoringFeedback({
+        type: 'error',
+        text: isAr
+          ? 'تم إرسال التقييم النهائي وقفله في Firestore ولا يمكن تعديله.'
+          : 'Final submitted evaluations are immutable and locked in Firestore.'
+      });
+      return;
+    }
+
+    if (rubricError) {
+      setScoringFeedback({ type: 'error', text: rubricError });
+      return;
+    }
+
+    if (activeEvaluation.conflictOfInterest) {
+      if (!activeEvaluation.conflictReason?.trim()) {
+        setScoringFeedback({
+          type: 'error',
+          text: isAr
+            ? 'يرجى إدخال سبب تعارض المصالح قبل الإرسال.'
+            : 'Please describe the conflict of interest reason before saving.'
+        });
+        return;
+      }
+    } else {
+      const validation = validateCriteriaScoresForRubric(
+        activeEvaluation.criteria,
+        activeCriteria,
+        { requireAllScored: submitFinal }
+      );
+      if (!validation.valid) {
+        setScoringFeedback({
+          type: 'error',
+          text: validation.error || 'Invalid criteria scores.'
+        });
+        return;
+      }
+      if (submitFinal) {
+        for (const def of activeCriteria) {
+          if (!activeEvaluation.criteria[def.id]?.rationale?.trim()) {
+            setScoringFeedback({
+              type: 'error',
+              text: isAr
+                ? `يرجى كتابة مبرر المحكم لمعيار "${def.nameAr}" قبل الاعتماد النهائي.`
+                : `Please enter a human judge rationale for "${def.name}" before final approval.`
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    const targetSubmission = selectedSubmission;
+    const targetHackathon = selectedHackathon;
+    const targetCriteria = activeCriteria;
+    const targetEvaluation = activeEvaluation;
+    const saveToken = coordinatorRef.current.startSave(targetSubmission.id);
+    if (!saveToken) return;
+
+    setSaving(true);
+    setScoringFeedback(null);
+
+    try {
+      const payload = toFirestoreEvaluationPayload({
+        evaluation: targetEvaluation,
+        organizerId: targetSubmission.organizerId,
+        activeCriteria: targetCriteria,
+        submitFinal
+      });
+
+      await saveEvaluation(
+        payload,
+        targetHackathon?.rubric?.length ? { rubric: targetHackathon.rubric } : undefined
+      );
+
+      const nowIso = new Date().toISOString();
+      const persistedEval: HumanJudgingEvaluation = {
+        ...targetEvaluation,
+        status: submitFinal ? 'approved' : 'draft',
+        firestoreStatus: submitFinal ? 'submitted' : 'draft',
+        scoreScale: '0_to_100',
+        finalWeightedScore: payload.weightedTotal,
+        approvedAt: submitFinal ? nowIso : null,
+        updatedAt: nowIso,
+        syncState: 'synced',
+        syncError: null,
+        hasLocalUnsavedChanges: false,
+        needsFinalizingRecovery: false
+      };
+      cacheHumanEvaluationLocally(persistedEval);
+
+      setEvaluations((prev) => ({ ...prev, [targetSubmission.id]: persistedEval }));
+      setFirestoreEvaluationsBySub((prev) => ({
+        ...prev,
+        [targetSubmission.id]: {
+          ...payload,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          ...(submitFinal ? { submittedAt: nowIso } : {})
+        }
+      }));
+
+      await loadAssignedWork(coordinatorRef.current.currentSubmissionId, {
+        silent: true,
+        preserveSelectionIfUnchanged: true
+      });
+
+      if (!coordinatorRef.current.isCurrentSave(saveToken)) {
+        return;
+      }
+
+      setScoringFeedback({
+        type: 'ok',
+        text: submitFinal
+          ? targetEvaluation.conflictOfInterest
+            ? isAr
+              ? 'تم تسجيل إعلان تعارض المصالح وإقفال التقييم في Cloud Firestore.'
+              : 'Conflict of interest evaluation submitted & locked in Cloud Firestore.'
+            : isAr
+              ? `تم اعتماد النتيجة الرسمية النهائية في Cloud Firestore: ${payload.weightedTotal.toFixed(2)}/100 وتم قفل التقييم.`
+              : `Official evaluation submitted & locked in Cloud Firestore: ${payload.weightedTotal.toFixed(2)}/100.`
+          : payload.criteriaScores.length > 0
+            ? isAr
+              ? `تم حفظ مسودة التقييم في Cloud Firestore (${payload.weightedTotal.toFixed(2)}/100).`
+              : `Evaluation draft saved to Cloud Firestore (${payload.weightedTotal.toFixed(2)}/100).`
+            : isAr
+              ? 'تم حفظ مسودة التقييم في Cloud Firestore.'
+              : 'Evaluation draft saved to Cloud Firestore.'
+      });
+    } catch (err) {
+      const errMsg =
+        err instanceof Error
+          ? err.message
+          : isAr
+            ? 'فشل حفظ التقييم في Cloud Firestore.'
+            : 'Failed to save evaluation to Cloud Firestore.';
+
+      const failedCache: HumanJudgingEvaluation = {
+        ...targetEvaluation,
+        status: 'draft',
+        syncState: 'sync_error',
+        syncError: errMsg,
+        hasLocalUnsavedChanges: true
+      };
+      cacheHumanEvaluationLocally(failedCache);
+      setEvaluations((prev) => ({ ...prev, [targetSubmission.id]: failedCache }));
+      if (coordinatorRef.current.isCurrentSave(saveToken)) {
+        setScoringFeedback({
+          type: 'error',
+          text: errMsg
+        });
+      }
+    } finally {
+      coordinatorRef.current.finishSave(saveToken);
+      setSaving(false);
+    }
+  };
+
+  const handleSaveDraft = () => {
+    void persistEvaluationToFirestore(false);
+  };
+
+  const handleApproveOfficial = () => {
+    void persistEvaluationToFirestore(true);
   };
 
   const handleExportAuditJson = () => {
     if (!sanitizedSubmission || !activeEvaluation) return;
     const exportPayload = {
       exportedAt: new Date().toISOString(),
-      criteriaDefinition: OFFICIAL_JUDGING_CRITERIA.map((c) => ({
+      scoreScale: '0_to_100',
+      criteriaDefinition: activeCriteria.map((c) => ({
         id: c.id,
         name: c.name,
         weightPercent: c.weightPercent
@@ -882,7 +1259,7 @@ export function EvidenceJudgingPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `hackmind-judging-v2-${sanitizedSubmission.id}.json`;
+    anchor.download = `hackmind-judging-${sanitizedSubmission.id}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
@@ -892,7 +1269,7 @@ export function EvidenceJudgingPage() {
   if (loading) {
     return (
       <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
-        {isAr ? 'جاري تحميل مساحة التحكيم المبنية على الأدلة...' : 'Loading Evidence-Based Judging System...'}
+        {isAr ? 'جاري تحميل مساحة التحكيم الموحدة...' : 'Loading Unified Evidence-Based Judging Workspace...'}
       </div>
     );
   }
@@ -905,27 +1282,94 @@ export function EvidenceJudgingPage() {
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0" />
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-              {isAr ? 'نظام التحكيم المبني على الأدلة (V2)' : 'Evidence-Based Judging System (V2)'}
+              {isAr ? 'مساحة التحكيم الموحدة بالأدلة' : 'Unified Evidence-Based Judging Workspace'}
             </h1>
           </div>
           <p className="text-xs text-slate-600 dark:text-slate-400 max-w-3xl">
             {isAr
-              ? 'نظام تحكيم مستقل تماماً يعتمد حصرياً على المعايير الأربعة الثابتة (25% / 30% / 25% / 20%)، يستبعد مقاطع الفيديو كلياً، ويحمي حصة Gemini عبر التفعيل الصريح فقط.'
-              : 'Independent evidence-verified judging system using strictly the four official criteria (25% / 30% / 25% / 20%), complete video exclusion, and QUOTA-SAFE MODE protection.'}
+              ? 'مساحة التحكيم الرسمية الموحدة على مقياس 0–100 عبر Cloud Firestore مع فحص الأدلة واستبعاد الفيديو وحماية حصة Gemini.'
+              : 'Authoritative unified judging workspace on a 0–100 scale backed by Cloud Firestore, deterministic evidence inspection, video exclusion, and QUOTA-SAFE MODE protection.'}
           </p>
         </div>
-
-        <Link
-          to="/app/judging"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-        >
-          <Gavel className="h-3.5 w-3.5" />
-          <span>{isAr ? 'مساحة التحكيم الكلاسيكية' : 'Legacy Judge Workspace'}</span>
-        </Link>
       </header>
 
+      {/* Judge Assignments Acceptance & Assignment-Level COI */}
+      {assignments.length > 0 && (
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] p-4 space-y-2 text-xs">
+          <div className="font-semibold text-slate-900 dark:text-white">
+            {isAr
+              ? `مهام التحكيم (${assignments.length})`
+              : `Judging Assignments (${assignments.length})`}
+          </div>
+          {assignments.map((a) => {
+            const hackTitle = hackathonsMap[a.hackathonId]?.title || a.hackathonId;
+            return (
+              <div
+                key={a.id}
+                className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60 first:border-t-0 first:pt-0"
+              >
+                <span className="text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold text-slate-900 dark:text-white">{hackTitle}</span> ·{' '}
+                  {isAr
+                    ? `${a.assignedSubmissionIds.length} تسليم`
+                    : `${a.assignedSubmissionIds.length} submission(s)`}{' '}
+                  · <span className="capitalize font-semibold">{a.status}</span>
+                  {a.conflictDeclared
+                    ? isAr
+                      ? ' (تعارض مصالح معلن — التقييم معطل)'
+                      : ' (Conflict Declared — Scoring Disabled)'
+                    : ''}
+                </span>
+                {a.status === 'invited' && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={assignmentBusy || saving}
+                      onClick={() => void handleAssignmentResponse(a, 'accepted', false, '')}
+                      className="rounded-md bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {t.common.accept}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={assignmentBusy || saving}
+                      onClick={() =>
+                        void handleAssignmentResponse(a, 'declined', false, 'Declined by judge')
+                      }
+                      className="rounded-md border border-slate-300 dark:border-slate-700 px-3 py-1 disabled:opacity-50"
+                    >
+                      {t.common.decline}
+                    </button>
+                  </div>
+                )}
+                {a.status === 'accepted' && !a.conflictDeclared && (
+                  <button
+                    type="button"
+                    disabled={assignmentBusy || saving}
+                    onClick={() =>
+                      void handleAssignmentResponse(
+                        a,
+                        'declined',
+                        true,
+                        'Judge declared conflict of interest on hackathon assignment'
+                      )
+                    }
+                    className="rounded-md border border-amber-500/40 px-2.5 py-1 text-amber-600 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50"
+                  >
+                    {isAr ? 'إعلان تعارض مصالح للمهمة' : 'Declare Assignment Conflict'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
       {loadError && (
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-xs text-red-700 dark:text-red-300">
+        <div
+          role="alert"
+          className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-xs text-red-700 dark:text-red-300"
+        >
           {loadError}
         </div>
       )}
@@ -937,17 +1381,15 @@ export function EvidenceJudgingPage() {
             {isAr ? 'لا توجد مشاريع مسندة للتحكيم حالياً' : 'No Assigned Submissions Available'}
           </h2>
           <p className="text-xs text-slate-600 dark:text-slate-400 max-w-lg mx-auto">
-            {isAr
-              ? 'يعرض هذا النظام المشاريع المُسندة لك كمحكّم معتمد أو مشاريع الهاكاثونات التي تنظمها دون إنشاء بيانات وهمية.'
-              : 'Only real Firestore submissions assigned to your accepted judge account (or organized by you) appear here. Accept a judge assignment or manage submissions in Organizer Studio.'}
+            {assignments.some((a) => a.status === 'invited')
+              ? isAr
+                ? 'اقبل دعوة التحكيم المعلقة أعلاه لفتح المشاريع المسندة لك وإدخال الدرجات.'
+                : 'Accept your pending judging assignment above to unlock assigned submissions and scoring.'
+              : isAr
+                ? 'يعرض هذا النظام المشاريع المُسندة لك كمحكّم معتمد أو مشاريع الهاكاثونات التي تنظمها دون إنشاء بيانات وهمية.'
+                : 'Only real Firestore submissions assigned to your accepted judge account (or organized by you) appear here.'}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-            <Link
-              to="/app/judging"
-              className="rounded-lg bg-blue-600 text-white px-4 py-2 text-xs font-semibold hover:bg-blue-700"
-            >
-              {isAr ? 'الانتقال لمساحة التحكيم' : 'Open Judge Assignments'}
-            </Link>
             <Link
               to="/app/organizer"
               className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -972,13 +1414,25 @@ export function EvidenceJudgingPage() {
             <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-[540px] overflow-y-auto">
               {submissions.map((sub) => {
                 const selected = sub.id === selectedSubmissionId;
-                const localEval = evaluations[sub.id];
+                const evalEntry = evaluations[sub.id];
+                const remoteEval = firestoreEvaluationsBySub[sub.id];
+                const displayStatus = evalEntry?.status === 'approved' || remoteEval?.status === 'submitted'
+                  ? 'approved'
+                  : remoteEval?.status === 'finalizing'
+                    ? 'finalizing'
+                    : evalEntry?.finalWeightedScore !== null && evalEntry?.finalWeightedScore !== undefined
+                      ? 'draft'
+                      : null;
+                const displayScore =
+                  evalEntry?.finalWeightedScore ??
+                  (remoteEval ? remoteEval.weightedTotal : null);
                 return (
                   <button
                     key={sub.id}
                     type="button"
-                    onClick={() => setSelectedSubmissionId(sub.id)}
-                    className={`w-full text-start py-3 px-2.5 rounded-lg transition-colors ${
+                    disabled={saving}
+                    onClick={() => handleSelectSubmission(sub)}
+                    className={`w-full text-start py-3 px-2.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                       selected
                         ? 'bg-blue-600/10 text-blue-700 dark:text-blue-300'
                         : 'hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-800 dark:text-slate-200'
@@ -989,11 +1443,17 @@ export function EvidenceJudgingPage() {
                       <span className="truncate">{sub.teamName || sub.teamId}</span>
                       <span>·</span>
                       <span>{sub.track || 'General'}</span>
-                      {localEval?.status === 'approved' && (
+                      {displayStatus && typeof displayScore === 'number' && (
                         <>
                           <span>·</span>
-                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                            {localEval.finalWeightedScore?.toFixed(1)}
+                          <span
+                            className={
+                              displayStatus === 'approved'
+                                ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                                : 'text-blue-600 dark:text-blue-400 font-semibold'
+                            }
+                          >
+                            {displayScore.toFixed(1)}/100 ({displayStatus})
                           </span>
                         </>
                       )}
@@ -1137,11 +1597,17 @@ export function EvidenceJudgingPage() {
               <HumanScoringPanel
                 locale={locale}
                 evaluation={activeEvaluation}
+                activeCriteria={activeCriteria}
+                isCustomRubric={isCustomRubric}
+                rubricError={rubricError}
                 canApproveAsJudge={canApproveAsJudge}
+                saving={saving}
                 actionFeedback={scoringFeedback}
                 onScoreChange={handleHumanScoreChange}
                 onRationaleChange={handleHumanRationaleChange}
                 onOverallCommentsChange={handleOverallCommentsChange}
+                onToggleCoi={handleToggleCoi}
+                onCoiReasonChange={handleCoiReasonChange}
                 onSaveDraft={handleSaveDraft}
                 onApproveOfficial={handleApproveOfficial}
                 onExportAuditJson={handleExportAuditJson}

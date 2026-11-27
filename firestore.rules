@@ -478,7 +478,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'criterionId', 'evaluationId', 'hackathonId', 'submissionId',
-          'judgeId', 'criterionName', 'weight', 'score', 'comment', 'updatedAt'
+          'judgeId', 'criterionName', 'weight', 'score', 'scoreScale', 'comment', 'updatedAt'
         ])
         && isValidId(data.criterionId)
         && data.criterionId == criterionId
@@ -490,7 +490,8 @@ service cloud.firestore {
         && data.criterionName is string
         && data.criterionName.matches('^[\\s\\S]{1,120}$')
         && data.weight is number && data.weight >= 0 && data.weight <= 100
-        && data.score is number && data.score >= 0 && data.score <= 10
+        && data.score is number && data.score >= 0 && data.score <= 100
+        && (!('scoreScale' in data) || data.scoreScale in ['0_to_10', '0_to_100'])
         && (!('comment' in data) || (data.comment is string && data.comment.matches('^[\\s\\S]{0,1000}$')))
         && data.updatedAt is timestamp;
     }
@@ -499,7 +500,7 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'hackathonId', 'organizerId', 'submissionId', 'judgeId', 'criteriaScores', 'weightedTotal', 'conflictOfInterest', 'status', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
           'id', 'hackathonId', 'organizerId', 'submissionId', 'judgeId', 'judgeName',
-          'criteriaScores', 'weightedTotal', 'scoredCriterionCount', 'storageSchema',
+          'criteriaScores', 'weightedTotal', 'scoreScale', 'scoredCriterionCount', 'storageSchema',
           'conflictOfInterest', 'conflictReason', 'humanFeedback',
           'aiReportSummary', 'aiInferenceSource', 'status', 'submittedAt', 'createdAt', 'updatedAt'
         ])
@@ -511,6 +512,7 @@ service cloud.firestore {
         && isOptionalString(data, 'judgeName', 100)
         && data.criteriaScores is list
         && data.criteriaScores.size() == 0
+        && (!('scoreScale' in data) || data.scoreScale in ['0_to_10', '0_to_100'])
         && (!('scoredCriterionCount' in data) || (data.scoredCriterionCount is int && data.scoredCriterionCount >= 0 && data.scoredCriterionCount <= 50))
         && (!('storageSchema' in data) || data.storageSchema in ['v1_inline', 'v2_subcollection'])
         && data.weightedTotal is number && data.weightedTotal >= 0 && data.weightedTotal <= 100
@@ -1592,7 +1594,7 @@ service cloud.firestore {
             existing().judgeId == request.auth.uid &&
             existing().status in ['draft', 'finalizing'] &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'criteriaScores', 'weightedTotal', 'scoredCriterionCount', 'storageSchema',
+              'criteriaScores', 'weightedTotal', 'scoreScale', 'scoredCriterionCount', 'storageSchema',
               'conflictOfInterest', 'conflictReason', 'humanFeedback',
               'aiReportSummary', 'aiInferenceSource', 'status', 'submittedAt', 'updatedAt'
             ]) &&

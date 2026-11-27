@@ -4,7 +4,8 @@ import type {
   NormalizedEvaluationCriterionDoc,
   ProjectSubmission,
   RankedSubmissionResult,
-  RubricCriterion
+  RubricCriterion,
+  ScoreScale
 } from '../../types/domain';
 
 export interface DraftCriterionScore {
@@ -12,8 +13,48 @@ export interface DraftCriterionScore {
   criterionName: string;
   weight: number;
   score: number | null;
+  scoreScale?: ScoreScale;
+  convertedFromScale?: ScoreScale;
+  originalScore?: number;
   scored: boolean;
   comment: string;
+}
+
+export const CANONICAL_SCORE_SCALE: ScoreScale = '0_to_100';
+
+export const CANONICAL_DEFAULT_RUBRIC: readonly RubricCriterion[] = [
+  {
+    id: 'innovation_originality',
+    name: 'Innovation & Originality',
+    description:
+      'Novelty of problem framing, originality of technical/product approach, and clear differentiation from generic wrappers.',
+    weight: 25
+  },
+  {
+    id: 'technical_implementation',
+    name: 'Technical Implementation',
+    description:
+      'Code quality, architecture, real working integrations, security/rule hygiene, and reliability verifiable in source code.',
+    weight: 30
+  },
+  {
+    id: 'real_world_impact',
+    name: 'Real-World Impact',
+    description:
+      'Practical value for real users, feasibility, scalability, and clarity of real-world problem fit.',
+    weight: 25
+  },
+  {
+    id: 'ux_completeness',
+    name: 'User Experience & Completeness',
+    description:
+      'End-to-end polish, usability, clear product flow, demo/readme completeness, and functional readiness.',
+    weight: 20
+  }
+];
+
+export function cloneCanonicalDefaultRubric(): RubricCriterion[] {
+  return CANONICAL_DEFAULT_RUBRIC.map((item) => ({ ...item }));
 }
 
 const VALID_CRITERION_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -23,12 +64,165 @@ export function roundWeightedScore(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function validateRubricWeights(rubric: RubricCriterion[]): { valid: boolean; sum: number } {
-  const sum = rubric.reduce((acc, item) => acc + Number(item.weight || 0), 0);
+export function validateRubricWeights(rubric: RubricCriterion[]): {
+  valid: boolean;
+  sum: number;
+  error?: string;
+} {
+  if (!Array.isArray(rubric) || rubric.length === 0) {
+    return { valid: false, sum: 0, error: 'Rubric must contain at least one criterion.' };
+  }
+  if (rubric.length > 12) {
+    return { valid: false, sum: 0, error: 'Rubric cannot exceed 12 criteria.' };
+  }
+  const seenIds = new Set<string>();
+  let sum = 0;
+  for (const item of rubric) {
+    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    const name = typeof item?.name === 'string' ? item.name.trim() : '';
+    const w = Number(item?.weight);
+    if (!id || !VALID_CRITERION_ID_REGEX.test(id)) {
+      return { valid: false, sum: 0, error: `Invalid rubric criterion ID: ${id || '(empty)'}.` };
+    }
+    if (seenIds.has(id)) {
+      return { valid: false, sum: 0, error: `Duplicate rubric criterion ID: ${id}.` };
+    }
+    seenIds.add(id);
+    if (!name) {
+      return { valid: false, sum: 0, error: `Criterion name is required for ${id}.` };
+    }
+    if (!Number.isFinite(w) || w <= 0 || w > 100) {
+      return { valid: false, sum: 0, error: `Weight for criterion "${name}" must be between 0 and 100.` };
+    }
+    sum += w;
+  }
+
+  const roundedSum = roundWeightedScore(sum);
+  if (roundedSum <= 0 || Math.abs(roundedSum - 100) >= 0.01) {
+    return {
+      valid: false,
+      sum: roundedSum,
+      error: `Rubric weights must sum to 100% (currently ${roundedSum}%).`
+    };
+  }
+
+  return { valid: true, sum: roundedSum };
+}
+
+export function normalizeCriterionScoreTo100(
+  rawScore: number,
+  options?: {
+    explicitScale?: ScoreScale;
+    convertedFromScale?: ScoreScale;
+    originalScore?: number;
+    inferLegacyZeroToTen?: boolean;
+  }
+): {
+  score: number;
+  scoreScale: '0_to_100';
+  convertedFromScale?: ScoreScale;
+  originalScore?: number;
+} {
+  const num = Number(rawScore);
+  if (!Number.isFinite(num)) {
+    return { score: 0, scoreScale: '0_to_100' };
+  }
+
+  const clamped100 = roundWeightedScore(Math.min(100, Math.max(0, num)));
+
+  // Already normalized or explicitly tagged as 0..100: NEVER convert again.
+  if (
+    options?.explicitScale === '0_to_100' ||
+    options?.convertedFromScale === '0_to_10' ||
+    num > 10
+  ) {
+    return {
+      score: clamped100,
+      scoreScale: '0_to_100',
+      ...(options?.convertedFromScale ? { convertedFromScale: options.convertedFromScale } : {}),
+      ...(options?.originalScore !== undefined ? { originalScore: options.originalScore } : {})
+    };
+  }
+
+  // Explicit legacy 0..10 or inferred legacy 0..10 document (pre-migration v1_inline or untagged <=10)
+  if (options?.explicitScale === '0_to_10' || options?.inferLegacyZeroToTen) {
+    const clamped10 = Math.min(10, Math.max(0, num));
+    return {
+      score: roundWeightedScore(clamped10 * 10),
+      scoreScale: '0_to_100',
+      convertedFromScale: '0_to_10',
+      originalScore: clamped10
+    };
+  }
+
   return {
-    valid: rubric.length > 0 && Math.abs(sum - 100) < 0.01,
-    sum: roundWeightedScore(sum)
+    score: clamped100,
+    scoreScale: '0_to_100'
   };
+}
+
+export function detectLegacyZeroToTenScale(
+  scores: Array<Pick<CriterionScore, 'score' | 'scoreScale' | 'convertedFromScale'>>,
+  parentEval?: Pick<Evaluation, 'scoreScale' | 'convertedFromScale' | 'storageSchema'> | null
+): boolean {
+  if (!Array.isArray(scores) || scores.length === 0) {
+    return parentEval?.scoreScale === '0_to_10';
+  }
+
+  // Explicit 0..100 or prior conversion guard prevents double conversion
+  if (
+    parentEval?.scoreScale === '0_to_100' ||
+    parentEval?.convertedFromScale === '0_to_10' ||
+    scores.some(
+      (s) =>
+        s.scoreScale === '0_to_100' ||
+        s.convertedFromScale === '0_to_10' ||
+        (Number.isFinite(Number(s.score)) && Number(s.score) > 10)
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    parentEval?.scoreScale === '0_to_10' ||
+    scores.some((s) => s.scoreScale === '0_to_10')
+  ) {
+    return true;
+  }
+
+  // Historical evaluations written before scoreScale was introduced were strictly bounded [0, 10] by firestore.rules
+  if (
+    parentEval &&
+    parentEval.scoreScale === undefined &&
+    scores.every((s) => s.scoreScale === undefined && Number.isFinite(Number(s.score)) && Number(s.score) >= 0 && Number(s.score) <= 10)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function normalizeCriterionScoresTo100(
+  scores: CriterionScore[],
+  parentEval?: Pick<Evaluation, 'scoreScale' | 'convertedFromScale' | 'storageSchema'> | null
+): CriterionScore[] {
+  if (!Array.isArray(scores) || scores.length === 0) return [];
+  const inferLegacy = detectLegacyZeroToTenScale(scores, parentEval);
+  return scores.map((item) => {
+    const normalized = normalizeCriterionScoreTo100(item.score, {
+      explicitScale: item.scoreScale ?? parentEval?.scoreScale,
+      convertedFromScale: item.convertedFromScale ?? parentEval?.convertedFromScale,
+      originalScore: item.originalScore,
+      inferLegacyZeroToTen: inferLegacy
+    });
+    return {
+      ...item,
+      score: normalized.score,
+      scoreScale: normalized.scoreScale,
+      ...(normalized.convertedFromScale ? { convertedFromScale: normalized.convertedFromScale } : {}),
+      ...(normalized.originalScore !== undefined ? { originalScore: normalized.originalScore } : {})
+    };
+  });
 }
 
 export function calculateWeightedTotalStrict(
@@ -55,12 +249,28 @@ export function calculateWeightedTotalStrict(
     if (typeof item.weight !== 'number' || !Number.isFinite(item.weight) || item.weight < 0 || item.weight > 100) {
       return { valid: false, weightedTotal: 0, error: `Invalid weight for criterion: ${item.criterionId}` };
     }
-    if (typeof item.score !== 'number' || !Number.isFinite(item.score) || item.score < 0 || item.score > 10) {
-      return { valid: false, weightedTotal: 0, error: `Score out of range [0, 10] for criterion: ${item.criterionId}` };
+
+    const maxAllowed = item.scoreScale === '0_to_10' ? 10 : 100;
+    if (
+      typeof item.score !== 'number' ||
+      !Number.isFinite(item.score) ||
+      item.score < 0 ||
+      item.score > maxAllowed
+    ) {
+      return {
+        valid: false,
+        weightedTotal: 0,
+        error: `Score out of range [0, ${maxAllowed}] for criterion: ${item.criterionId}`
+      };
     }
 
+    const scoreOn100 =
+      item.scoreScale === '0_to_10' && !item.convertedFromScale
+        ? item.score * 10
+        : item.score;
+
     totalWeight += item.weight;
-    weighted += (item.score / 10) * item.weight;
+    weighted += (scoreOn100 / 100) * item.weight;
   }
 
   if (totalWeight <= 0) {
@@ -114,15 +324,19 @@ export function calculateWeightedTotal(scores: CriterionScore[]): number {
     const rawScore = Number(item.score);
     const rawWeight = Number(item.weight);
     if (!Number.isFinite(rawScore) || !Number.isFinite(rawWeight)) continue;
-    const clampedScore = Math.min(10, Math.max(0, rawScore));
+
+    const scoreOn100 =
+      item.scoreScale === '0_to_10' && !item.convertedFromScale
+        ? Math.min(10, Math.max(0, rawScore)) * 10
+        : Math.min(100, Math.max(0, rawScore));
+
     const weight = Math.max(0, Math.min(100, rawWeight));
     totalWeight += weight;
-    weighted += (clampedScore / 10) * weight;
+    weighted += (scoreOn100 / 100) * weight;
   }
 
   if (totalWeight <= 0) return 0;
 
-  // Normalize to 0-100 scale even if custom weights were slightly off 100
   const normalized = (weighted / totalWeight) * 100;
   return roundWeightedScore(normalized);
 }
@@ -137,6 +351,7 @@ export function hydrateEvaluationScoresAndTotal(
       ...parentEval,
       criteriaScores: [],
       weightedTotal: 0,
+      scoreScale: '0_to_100',
       scoredCriterionCount: 0,
       storageSchema: parentEval.storageSchema ?? 'v2_subcollection'
     };
@@ -149,6 +364,13 @@ export function hydrateEvaluationScoresAndTotal(
         criterionName: c.criterionName,
         weight: Number(c.weight),
         score: Number(c.score),
+        ...(c.scoreScale ? { scoreScale: c.scoreScale } : {}),
+        ...('convertedFromScale' in c && c.convertedFromScale
+          ? { convertedFromScale: c.convertedFromScale }
+          : {}),
+        ...('originalScore' in c && c.originalScore !== undefined
+          ? { originalScore: c.originalScore }
+          : {}),
         comment: typeof c.comment === 'string' ? c.comment : ''
       }))
     : Array.isArray(parentEval.criteriaScores)
@@ -157,11 +379,14 @@ export function hydrateEvaluationScoresAndTotal(
           criterionName: c.criterionName,
           weight: Number(c.weight),
           score: Number(c.score),
+          ...(c.scoreScale ? { scoreScale: c.scoreScale } : {}),
+          ...(c.convertedFromScale ? { convertedFromScale: c.convertedFromScale } : {}),
+          ...(c.originalScore !== undefined ? { originalScore: c.originalScore } : {}),
           comment: typeof c.comment === 'string' ? c.comment : ''
         }))
       : [];
 
-  // Deduplicate cleanly by criterionId and filter invalid items
+  // Deduplicate cleanly by criterionId and filter invalid items (accepting canonical 0..100)
   const dedupedMap = new Map<string, CriterionScore>();
   for (const item of rawList) {
     if (
@@ -172,7 +397,7 @@ export function hydrateEvaluationScoresAndTotal(
       item.weight <= 100 &&
       Number.isFinite(item.score) &&
       item.score >= 0 &&
-      item.score <= 10 &&
+      item.score <= 100 &&
       !dedupedMap.has(item.criterionId)
     ) {
       dedupedMap.set(item.criterionId, item);
@@ -196,34 +421,46 @@ export function hydrateEvaluationScoresAndTotal(
     orderedScores = Array.from(dedupedMap.values());
   }
 
-  const recomputedTotal = orderedScores.length > 0 ? calculateWeightedTotal(orderedScores) : 0;
+  // Non-destructively normalize legacy 0..10 scores to 0..100 in memory without double-converting
+  const normalizedScores = normalizeCriterionScoresTo100(orderedScores, parentEval);
+  const convertedFromLegacy = normalizedScores.some((s) => s.convertedFromScale === '0_to_10');
+
+  const recomputedTotal = normalizedScores.length > 0 ? calculateWeightedTotal(normalizedScores) : 0;
   const resolvedSchema = hasSubDocs
     ? 'v2_subcollection'
-    : orderedScores.length > 0
+    : normalizedScores.length > 0
       ? 'v1_inline'
       : parentEval.storageSchema ?? 'v2_subcollection';
 
   return {
     ...parentEval,
-    criteriaScores: orderedScores,
+    criteriaScores: normalizedScores,
     weightedTotal: recomputedTotal,
-    scoredCriterionCount: orderedScores.length,
+    scoreScale: '0_to_100',
+    ...(convertedFromLegacy || parentEval.convertedFromScale === '0_to_10'
+      ? { convertedFromScale: '0_to_10' as const }
+      : {}),
+    scoredCriterionCount: normalizedScores.length,
     storageSchema: resolvedSchema
   };
 }
 
 export function initializeHumanCriteriaScores(
   rubric: RubricCriterion[],
-  existingEval?: Pick<Evaluation, 'criteriaScores' | 'status'> | null
+  existingEval?: Pick<Evaluation, 'criteriaScores' | 'status' | 'scoreScale' | 'convertedFromScale' | 'storageSchema'> | null
 ): DraftCriterionScore[] {
   if (existingEval) {
-    const saved = (existingEval.criteriaScores || []).map((c) => {
+    const normalizedSaved = normalizeCriterionScoresTo100(existingEval.criteriaScores || [], existingEval);
+    const saved = normalizedSaved.map((c) => {
       const hasValidSavedScore = typeof c.score === 'number' && Number.isFinite(c.score);
       return {
         criterionId: c.criterionId,
         criterionName: c.criterionName,
         weight: c.weight,
-        score: hasValidSavedScore ? Math.min(10, Math.max(0, c.score)) : null,
+        score: hasValidSavedScore ? Math.min(100, Math.max(0, c.score)) : null,
+        scoreScale: '0_to_100' as const,
+        ...(c.convertedFromScale ? { convertedFromScale: c.convertedFromScale } : {}),
+        ...(c.originalScore !== undefined ? { originalScore: c.originalScore } : {}),
         scored: hasValidSavedScore,
         comment: c.comment || ''
       };
@@ -253,6 +490,7 @@ export function initializeHumanCriteriaScores(
           criterionName: r.name,
           weight: r.weight,
           score: null,
+          scoreScale: '0_to_100',
           scored: false,
           comment: ''
         });
@@ -266,6 +504,7 @@ export function initializeHumanCriteriaScores(
     criterionName: r.name,
     weight: r.weight,
     score: null,
+    scoreScale: '0_to_100',
     scored: false,
     comment: ''
   }));
@@ -277,9 +516,16 @@ export function setHumanCriterionScore(
   rawScore: number
 ): DraftCriterionScore[] {
   if (index < 0 || index >= scores.length || !Number.isFinite(rawScore)) return scores;
-  const clamped = Math.min(10, Math.max(0, Number(rawScore)));
+  const clamped = roundWeightedScore(Math.min(100, Math.max(0, Number(rawScore))));
   return scores.map((item, idx) =>
-    idx === index ? { ...item, score: clamped, scored: true } : item
+    idx === index
+      ? {
+          ...item,
+          score: clamped,
+          scoreScale: '0_to_100',
+          scored: true
+        }
+      : item
   );
 }
 
@@ -307,6 +553,8 @@ export function calculateDraftWeightedPreview(scores: DraftCriterionScore[]): {
         criterionName: s.criterionName,
         weight: s.weight,
         score: s.score,
+        scoreScale: s.scoreScale ?? '0_to_100',
+        ...(s.convertedFromScale ? { convertedFromScale: s.convertedFromScale } : {}),
         comment: s.comment
       });
     }
@@ -408,14 +656,14 @@ export function validateEvaluationSubmission(params: {
         weightedTotal: 0
       };
     }
-    if (item.scored && (item.score === null || !Number.isFinite(item.score) || item.score < 0 || item.score > 10)) {
+    if (item.scored && (item.score === null || !Number.isFinite(item.score) || item.score < 0 || item.score > 100)) {
       return {
         valid: false,
         unscoredCriteria: [],
         errorMessage:
           locale === 'ar'
-            ? `الدرجة يجب أن تكون بين 0 و 10 للمعيار: ${item.criterionName}.`
-            : `Score must be between 0 and 10 for criterion: ${item.criterionName}.`,
+            ? `الدرجة يجب أن تكون بين 0 و 100 للمعيار: ${item.criterionName}.`
+            : `Score must be between 0 and 100 for criterion: ${item.criterionName}.`,
         persistedScores: [],
         weightedTotal: 0
       };
@@ -446,7 +694,8 @@ export function validateEvaluationSubmission(params: {
       criterionId: c.criterionId,
       criterionName: c.criterionName,
       weight: c.weight,
-      score: Number(c.score),
+      score: roundWeightedScore(Number(c.score)),
+      scoreScale: '0_to_100',
       comment: c.comment
     }));
 
@@ -492,7 +741,8 @@ function getAuthoritativeEvaluationTotal(
   }
 
   if (ev.criteriaScores && ev.criteriaScores.length > 0) {
-    const strict = calculateWeightedTotalStrict(ev.criteriaScores, rubric);
+    const normalizedCriteria = normalizeCriterionScoresTo100(ev.criteriaScores, ev);
+    const strict = calculateWeightedTotalStrict(normalizedCriteria, rubric);
     if (!strict.valid) {
       return { eligible: false, total: 0 };
     }

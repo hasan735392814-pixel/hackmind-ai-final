@@ -31,7 +31,11 @@ import {
 import { executeHybridInference } from '../services/hybridAI/inferenceManager';
 import { buildTaskPrompt } from '../services/hybridAI/promptRegistry';
 import type { HybridExecutionResult } from '../services/hybridAI/types';
-import { computeFairRankings, validateRubricWeights } from '../services/judging/fairJudgingEngine';
+import {
+  cloneCanonicalDefaultRubric,
+  computeFairRankings,
+  validateRubricWeights
+} from '../services/judging/fairJudgingEngine';
 import type {
   AccountRole,
   AuditLogEntry,
@@ -68,12 +72,7 @@ interface AIHackathonDraft {
   rubric?: { name: string; description: string; weight: number }[];
 }
 
-const DEFAULT_RUBRIC: RubricCriterion[] = [
-  { id: 'innovation', name: 'Innovation & Originality', description: 'Novelty and creative use of hybrid AI', weight: 25 },
-  { id: 'tech', name: 'Technical Implementation', description: 'Architecture, code quality, and reliability', weight: 30 },
-  { id: 'impact', name: 'Real-World Impact', description: 'Clarity of problem and measurable usefulness', weight: 20 },
-  { id: 'ux', name: 'User Experience & Completeness', description: 'Polish, accessibility, and working end-to-end flow', weight: 25 }
-];
+const DEFAULT_RUBRIC: RubricCriterion[] = cloneCanonicalDefaultRubric();
 
 type StudioTab = 'events' | 'registrations' | 'teams' | 'judging' | 'results' | 'admin';
 
@@ -313,32 +312,7 @@ export function OrganizerStudioPage() {
     setRules(
       'Proposed: All submitted code and prototypes must be built during the competition window. Open-source libraries and AI tools are permitted with transparent attribution.'
     );
-    setRubric([
-      {
-        id: 'innovation',
-        name: 'Innovation & Originality',
-        description: 'Novelty and practical AI problem-solving approach',
-        weight: 25
-      },
-      {
-        id: 'tech',
-        name: 'Technical Implementation',
-        description: 'Architecture, code quality, security, and reliability',
-        weight: 30
-      },
-      {
-        id: 'impact',
-        name: 'Real-World Impact',
-        description: 'Clarity of use case across target domain and measurable value',
-        weight: 25
-      },
-      {
-        id: 'ux',
-        name: 'User Experience & Completeness',
-        description: 'Working end-to-end flow, clarity, and accessibility',
-        weight: 20
-      }
-    ]);
+    setRubric(cloneCanonicalDefaultRubric());
     setStatus('draft');
     setFeedback(
       locale === 'ar'
@@ -1408,17 +1382,63 @@ export function OrganizerStudioPage() {
               </div>
 
               {/* Rubric Weights */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-semibold">
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
                   <span>
                     {locale === 'ar'
-                      ? 'معايير التحكيم (يجب أن يساوي المجموع 100%)'
-                      : 'Judging Rubric (Total must equal 100%)'}
+                      ? 'معايير التحكيم (مقياس 0–100 · يجب أن يساوي المجموع 100%)'
+                      : 'Judging Rubric (0–100 Scale · Weights must sum to 100%)'}
                   </span>
-                  <span className="font-mono tabular-nums">{validateRubricWeights(rubric).sum}%</span>
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`font-mono tabular-nums ${
+                        validateRubricWeights(rubric).valid
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}
+                    >
+                      {validateRubricWeights(rubric).sum}%
+                    </span>
+                    {!isEditingLockedCompleted && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setRubric(cloneCanonicalDefaultRubric())}
+                          className="rounded border border-slate-300 dark:border-slate-700 px-2 py-1 text-[11px] font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          {locale === 'ar' ? 'استعادة الافتراضي (25/30/25/20)' : 'Reset Default (25/30/25/20)'}
+                        </button>
+                        {rubric.length < 10 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRubric((prev) => [
+                                ...prev,
+                                {
+                                  id: `crit_${Date.now()}`,
+                                  name: `Criterion ${prev.length + 1}`,
+                                  description: '',
+                                  weight: 0
+                                }
+                              ])
+                            }
+                            className="inline-flex items-center gap-1 rounded border border-slate-300 dark:border-slate-700 px-2 py-1 text-[11px] font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            <Plus className="h-3 w-3" />
+                            <span>{locale === 'ar' ? 'إضافة معيار' : 'Add Criterion'}</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
+                {!validateRubricWeights(rubric).valid && (
+                  <p className="text-[11px] text-red-600 dark:text-red-400">
+                    {validateRubricWeights(rubric).error}
+                  </p>
+                )}
                 {rubric.map((crit, idx) => (
-                  <div key={crit.id} className="grid grid-cols-12 gap-2">
+                  <div key={crit.id} className="grid grid-cols-12 gap-2 items-center">
                     <input
                       type="text"
                       disabled={isEditingLockedCompleted}
@@ -1428,7 +1448,7 @@ export function OrganizerStudioPage() {
                         next[idx] = { ...crit, name: e.target.value };
                         setRubric(next);
                       }}
-                      className="col-span-5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#070B14] px-2.5 py-1.5 text-xs"
+                      className="col-span-4 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#070B14] px-2.5 py-1.5 text-xs"
                     />
                     <input
                       type="text"
@@ -1445,6 +1465,7 @@ export function OrganizerStudioPage() {
                       type="number"
                       min={0}
                       max={100}
+                      step={1}
                       disabled={isEditingLockedCompleted}
                       value={crit.weight}
                       onChange={(e) => {
@@ -1454,6 +1475,18 @@ export function OrganizerStudioPage() {
                       }}
                       className="col-span-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#070B14] px-2 py-1.5 text-xs font-mono tabular-nums"
                     />
+                    <div className="col-span-1 flex justify-end">
+                      {!isEditingLockedCompleted && rubric.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setRubric((prev) => prev.filter((_, i) => i !== idx))}
+                          aria-label={locale === 'ar' ? 'حذف المعيار' : 'Remove criterion'}
+                          className="p-1 text-slate-400 hover:text-red-500"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

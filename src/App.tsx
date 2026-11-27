@@ -13,7 +13,6 @@ import { BuilderWorkspacePage } from './pages/BuilderWorkspacePage';
 import { TeamsMatchingPage } from './pages/TeamsMatchingPage';
 import { AIMentorPage } from './pages/AIMentorPage';
 import { SubmissionsPage } from './pages/SubmissionsPage';
-import { JudgeWorkspacePage } from './pages/JudgeWorkspacePage';
 import { EvidenceJudgingPage } from './pages/EvidenceJudgingPage';
 import { SponsorAnalyticsPage } from './pages/SponsorAnalyticsPage';
 import { DiagnosticsPage } from './pages/DiagnosticsPage';
@@ -102,11 +101,7 @@ export default function App() {
               />
               <Route
                 path="/app/judging"
-                element={
-                  <ProtectedRoute>
-                    <JudgeWorkspacePage />
-                  </ProtectedRoute>
-                }
+                element={<Navigate to="/app/judging-v2" replace />}
               />
               <Route
                 path="/app/judging-v2"

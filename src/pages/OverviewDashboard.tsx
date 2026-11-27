@@ -201,10 +201,10 @@ export function OverviewDashboard() {
           </Link>
           {effectiveRole === 'judge' && (
             <Link
-              to="/app/judging"
+              to="/app/judging-v2"
               className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
-              {locale === 'ar' ? 'مساحة التحكيم' : 'Judge Workspace'}
+              {locale === 'ar' ? 'مساحة التحكيم' : 'Judging Workspace'}
             </Link>
           )}
           {effectiveRole === 'sponsor' && (

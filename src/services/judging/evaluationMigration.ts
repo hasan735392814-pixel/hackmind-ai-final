@@ -9,7 +9,12 @@ import {
   type Firestore
 } from 'firebase/firestore';
 import type { CriterionScore, Evaluation, NormalizedEvaluationCriterionDoc } from '../../types/domain';
-import { calculateWeightedTotal, hydrateEvaluationScoresAndTotal } from './fairJudgingEngine';
+import {
+  calculateWeightedTotal,
+  detectLegacyZeroToTenScale,
+  hydrateEvaluationScoresAndTotal,
+  normalizeCriterionScoreTo100
+} from './fairJudgingEngine';
 import { isValidFirestoreId, sanitizeString } from '../../utils/validation';
 
 export type EvaluationMigrationOutcome =
@@ -99,16 +104,30 @@ export async function migrateLegacyEvaluationToSubcollection(
   let preservedExistingCriteriaCount = 0;
   const mergedForTotal = new Map<string, CriterionScore>();
 
+  const existingSubDocsList = Array.from(existingSubById.values());
+  const inferLegacySub = detectLegacyZeroToTenScale(existingSubDocsList, parentData);
+
   for (const [id, existingDoc] of existingSubById.entries()) {
+    const normalizedExisting = normalizeCriterionScoreTo100(Number(existingDoc.score), {
+      explicitScale: existingDoc.scoreScale ?? parentData.scoreScale,
+      inferLegacyZeroToTen: inferLegacySub
+    });
     mergedForTotal.set(id, {
       criterionId: existingDoc.criterionId || id,
       criterionName: existingDoc.criterionName,
       weight: Number(existingDoc.weight),
-      score: Number(existingDoc.score),
+      score: normalizedExisting.score,
+      scoreScale: normalizedExisting.scoreScale,
+      ...(normalizedExisting.convertedFromScale ? { convertedFromScale: normalizedExisting.convertedFromScale } : {}),
       comment: existingDoc.comment || ''
     });
     preservedExistingCriteriaCount += 1;
   }
+
+  const inferLegacyInline = detectLegacyZeroToTenScale(legacyScores, {
+    ...parentData,
+    storageSchema: parentData.storageSchema ?? 'v1_inline'
+  });
 
   for (const rawItem of legacyScores) {
     if (!rawItem || typeof rawItem.criterionId !== 'string' || !isValidFirestoreId(rawItem.criterionId)) {
@@ -120,17 +139,24 @@ export async function migrateLegacyEvaluationToSubcollection(
     }
 
     const weight = Number(rawItem.weight);
-    const score = Number(rawItem.score);
+    const rawScore = Number(rawItem.score);
     if (
       !Number.isFinite(weight) ||
       weight < 0 ||
       weight > 100 ||
-      !Number.isFinite(score) ||
-      score < 0 ||
-      score > 10
+      !Number.isFinite(rawScore) ||
+      rawScore < 0 ||
+      rawScore > 100
     ) {
       continue;
     }
+
+    const normalized = normalizeCriterionScoreTo100(rawScore, {
+      explicitScale: rawItem.scoreScale ?? parentData.scoreScale,
+      convertedFromScale: rawItem.convertedFromScale,
+      originalScore: rawItem.originalScore,
+      inferLegacyZeroToTen: inferLegacyInline
+    });
 
     const criterionName = sanitizeString(rawItem.criterionName || rawItem.criterionId, 120) || rawItem.criterionId;
     const comment = sanitizeString(rawItem.comment || '', 1000);
@@ -144,7 +170,8 @@ export async function migrateLegacyEvaluationToSubcollection(
         judgeId: parentData.judgeId,
         criterionName,
         weight,
-        score,
+        score: normalized.score,
+        scoreScale: '0_to_100',
         comment,
         updatedAt: serverTimestamp()
       });
@@ -153,7 +180,8 @@ export async function migrateLegacyEvaluationToSubcollection(
         criterionId: rawItem.criterionId,
         criterionName,
         weight,
-        score,
+        score: normalized.score,
+        scoreScale: '0_to_100',
         comment
       });
     }
@@ -165,6 +193,7 @@ export async function migrateLegacyEvaluationToSubcollection(
   await updateDoc(evalRef, {
     criteriaScores: [],
     weightedTotal: recomputedWeightedTotal,
+    scoreScale: '0_to_100',
     scoredCriterionCount: finalScores.length,
     storageSchema: 'v2_subcollection',
     updatedAt: serverTimestamp()
