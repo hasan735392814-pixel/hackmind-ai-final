@@ -3718,7 +3718,8 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
           criterionId: r.id,
           criterionName: r.name,
           weight: r.weight,
-          score: idx % 2 === 0 ? 8 : 7,
+          score: idx % 2 === 0 ? 80 : 70,
+          scoreScale: '0_to_100',
           comment: `Partial ${idx + 1}`
         }));
         await assertSucceeds(
@@ -3740,6 +3741,7 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
                 criterionName: s.criterionName,
                 weight: s.weight,
                 score: s.score,
+                scoreScale: '0_to_100',
                 comment: s.comment,
                 updatedAt: serverTimestamp()
               })
@@ -3758,7 +3760,8 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
             judgeId: 'j_m',
             criterionName: lastRubricItem.name,
             weight: lastRubricItem.weight + 5,
-            score: 9,
+            score: 90,
+            scoreScale: '0_to_100',
             comment: 'Tampered weight',
             updatedAt: serverTimestamp()
           })
@@ -3769,7 +3772,8 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
           criterionId: r.id,
           criterionName: r.name,
           weight: r.weight,
-          score: idx % 2 === 0 ? 8.5 : 6.5,
+          score: idx % 2 === 0 ? 85 : 65,
+          scoreScale: '0_to_100',
           comment: `Complete ${idx + 1}`
         }));
         const expectedTotal = calculateWeightedTotal(fullScores);
@@ -3795,6 +3799,7 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
                   criterionName: s.criterionName,
                   weight: s.weight,
                   score: s.score,
+                  scoreScale: '0_to_100',
                   comment: s.comment,
                   updatedAt: serverTimestamp()
                 })
@@ -3806,7 +3811,7 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
         // 4. Draft recovery (re-read parent + /criteria, mutate last criterion)
         const draftCritSnap = await assertSucceeds(getDocs(collection(jDb, 'evaluations', evaluationId, 'criteria')));
         expect(draftCritSnap.docs).toHaveLength(size);
-        const recoveredLastScore = 9;
+        const recoveredLastScore = 90;
         await assertSucceeds(
           updateDoc(doc(jDb, 'evaluations', evaluationId, 'criteria', lastRubricItem.id), {
             criterionId: lastRubricItem.id,
@@ -3817,6 +3822,7 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
             criterionName: lastRubricItem.name,
             weight: lastRubricItem.weight,
             score: recoveredLastScore,
+            scoreScale: '0_to_100',
             comment: 'Updated during draft recovery',
             updatedAt: serverTimestamp()
           })
@@ -4011,9 +4017,9 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
         expect(draftResult.recomputedWeightedTotal).toBe(94);
 
         const c1Snap = await getDoc(doc(db, 'evaluations', draftEvalId, 'criteria', 'c1'));
-        expect(c1Snap.data()?.score).toBe(10);
+        expect(c1Snap.data()?.score).toBe(100);
         const c2Snap = await getDoc(doc(db, 'evaluations', draftEvalId, 'criteria', 'c2'));
-        expect(c2Snap.data()?.score).toBe(9);
+        expect(c2Snap.data()?.score).toBe(90);
 
         // Idempotent second run reports already_migrated with zero extra writes
         const secondRun = await migrateLegacyEvaluationToSubcollection(modularDb, draftEvalId);
@@ -4701,9 +4707,9 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
 
       const draftC1 = await assertSucceeds(getDoc(doc(adminDb, 'evaluations', draftEvalId, 'criteria', 'c1')));
       const draftC2 = await assertSucceeds(getDoc(doc(adminDb, 'evaluations', draftEvalId, 'criteria', 'c2')));
-      expect(draftC1.data()?.score).toBe(10);
+      expect(draftC1.data()?.score).toBe(100);
       expect(draftC1.data()?.comment).toBe('Already migrated newer comment');
-      expect(draftC2.data()?.score).toBe(9);
+      expect(draftC2.data()?.score).toBe(90);
       expect(draftC2.data()?.comment).toBe('Legacy c2 comment');
 
       const submittedRes = await migrateLegacyEvaluationToSubcollection(adminDb, submittedEvalId, {
@@ -4716,10 +4722,10 @@ describe('HackMind AI — Firestore Security Rules Emulator Test Suite', () => {
       const subC1 = await assertSucceeds(getDoc(doc(adminDb, 'evaluations', submittedEvalId, 'criteria', 'c1')));
       const subC2 = await assertSucceeds(getDoc(doc(adminDb, 'evaluations', submittedEvalId, 'criteria', 'c2')));
       expect(subC1.id).toBe('c1');
-      expect(subC1.data()?.score).toBe(7);
+      expect(subC1.data()?.score).toBe(70);
       expect(subC1.data()?.comment).toBe('Submitted inline c1');
       expect(subC2.id).toBe('c2');
-      expect(subC2.data()?.score).toBe(8);
+      expect(subC2.data()?.score).toBe(80);
       expect(subC2.data()?.comment).toBe('Submitted inline c2');
 
       // Re-running migration is idempotent under live Rules
